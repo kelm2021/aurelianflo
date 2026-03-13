@@ -100,7 +100,15 @@ app.get("/debug/cdp", async (req, res) => {
       headers: supportedHeaders,
     });
     const data = await r.text();
-    res.json({ status: r.status, envKeySet: !!process.env.CDP_API_KEY_ID, headers: Object.keys(supportedHeaders), body: data.substring(0, 500) });
+    res.json({
+      status: r.status,
+      envKeyId: process.env.CDP_API_KEY_ID,
+      secretLen: process.env.CDP_API_KEY_SECRET?.length,
+      secretFirst4: process.env.CDP_API_KEY_SECRET?.substring(0, 4),
+      secretLast4: process.env.CDP_API_KEY_SECRET?.slice(-4),
+      headers: Object.keys(supportedHeaders),
+      body: data.substring(0, 500),
+    });
   } catch (err) {
     res.json({ error: err.message, stack: err.stack?.substring(0, 300) });
   }
