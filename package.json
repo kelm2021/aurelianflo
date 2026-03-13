@@ -14,6 +14,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@coinbase/x402": "^2.1.0",
     "express": "^5.2.1",
     "node-fetch": "^2.7.0",
     "x402-express": "^1.1.0"

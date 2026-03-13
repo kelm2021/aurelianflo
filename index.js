@@ -152,7 +152,9 @@ const routeConfig = {
   },
 };
 
-const payment = paymentMiddleware(PAY_TO, routeConfig);
+// Use CDP facilitator for payment verification/settlement
+const { facilitator } = require("@coinbase/x402");
+const payment = paymentMiddleware(PAY_TO, routeConfig, facilitator);
 
 // --- Debug: test facilitator connectivity ---
 app.get("/debug/facilitator", async (req, res) => {
@@ -160,6 +162,17 @@ app.get("/debug/facilitator", async (req, res) => {
     const r = await fetch("https://x402.org/facilitator/supported");
     const data = await r.json();
     res.json({ status: r.status, data });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+// --- Debug: manual payment test ---
+app.get("/debug/test-pay", async (req, res) => {
+  try {
+    const { useFacilitator } = require("x402/verify");
+    const { verify, settle } = useFacilitator();
+    res.json({ message: "Facilitator initialized, send a payment to /api/exchange-rates/USD to test" });
   } catch (err) {
     res.json({ error: err.message });
   }
