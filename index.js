@@ -2,6 +2,7 @@ const express = require("express");
 const { paymentMiddleware, x402ResourceServer } = require("@x402/express");
 const { HTTPFacilitatorClient } = require("@x402/core/server");
 const { ExactEvmScheme } = require("@x402/evm/exact/server");
+const { createFacilitatorConfig } = require("@coinbase/x402");
 
 const app = express();
 app.use(express.json());
@@ -12,10 +13,12 @@ app.set("trust proxy", 1);
 const PAY_TO = "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d";
 const NETWORK = "eip155:8453"; // Base mainnet (CAIP-2)
 
-// CDP facilitator for Base mainnet
-const facilitatorClient = new HTTPFacilitatorClient({
-  url: "https://api.cdp.coinbase.com/platform/v2/x402",
-});
+// CDP facilitator for Base mainnet (authenticated via CDP API keys)
+const facilitatorConfig = createFacilitatorConfig(
+  process.env.CDP_API_KEY_ID,
+  process.env.CDP_API_KEY_SECRET,
+);
+const facilitatorClient = new HTTPFacilitatorClient(facilitatorConfig);
 
 const resourceServer = new x402ResourceServer(facilitatorClient)
   .register(NETWORK, new ExactEvmScheme());
