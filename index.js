@@ -172,6 +172,17 @@ function getPaymentMiddleware() {
 const paymentGate = async (req, res, next) => {
   try {
     const mw = await getPaymentMiddleware();
+    // Intercept response to log settlement errors
+    const hasPayment = !!req.header("X-PAYMENT");
+    if (hasPayment) {
+      const origJson = res.json.bind(res);
+      res.json = function(body) {
+        if (res.statusCode === 402 && body?.error) {
+          console.error("x402 SETTLE ERROR:", JSON.stringify(body));
+        }
+        return origJson(body);
+      };
+    }
     mw(req, res, next);
   } catch (err) {
     res.status(500).json({ error: "Payment middleware init failed", details: err.message });
