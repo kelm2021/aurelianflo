@@ -154,6 +154,17 @@ const routeConfig = {
 
 const payment = paymentMiddleware(PAY_TO, routeConfig);
 
+// --- Debug: test facilitator connectivity ---
+app.get("/debug/facilitator", async (req, res) => {
+  try {
+    const r = await fetch("https://x402.org/facilitator/supported");
+    const data = await r.json();
+    res.json({ status: r.status, data });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 // --- Health check (free) ---
 app.get("/", (req, res) => {
   const endpoints = Object.keys(routeConfig).map((key) => {
