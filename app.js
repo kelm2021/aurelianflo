@@ -28,6 +28,7 @@ const {
 const {
   createMercTrustEnforcementFromEnv,
 } = require("./lib/merc-trust-enforcement");
+const WELL_KNOWN_X402_AURELIAN = require("./well-known-x402-aurelian.json");
 
 const PAY_TO = "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d";
 const X402_NETWORK = "eip155:8453";
@@ -1345,6 +1346,12 @@ function createApiDiscoveryHandler(routes = routeConfig) {
   };
 }
 
+function createWellKnownX402AurelianHandler(manifest = WELL_KNOWN_X402_AURELIAN) {
+  return function wellKnownX402AurelianHandler(_req, res) {
+    res.json(manifest);
+  };
+}
+
 function createHeadProtectedPaymentGate(paymentGate, routes = routeConfig) {
   const matchRoute = createRouteMatcher(routes);
 
@@ -1459,6 +1466,7 @@ function createApp(options = {}) {
       onResult: options.mercTrustOnResult ?? mercTrustEnforcementOptions.onResult,
     });
   const enableDebugRoutes = options.enableDebugRoutes ?? true;
+  const wellKnownX402Aurelian = options.wellKnownX402Aurelian ?? WELL_KNOWN_X402_AURELIAN;
 
   const app = express();
   app.use(express.json());
@@ -1472,6 +1480,11 @@ function createApp(options = {}) {
 
   app.get("/", createHealthHandler(routes));
   app.get("/api", createApiDiscoveryHandler(routes));
+  app.get("/well-known-x402-aurelian.json", createWellKnownX402AurelianHandler(wellKnownX402Aurelian));
+  app.get(
+    "/.well-known/x402-aurelian.json",
+    createWellKnownX402AurelianHandler(wellKnownX402Aurelian),
+  );
   app.get(
     "/ops/metrics",
     createMetricsDashboardHandler({
@@ -1551,6 +1564,7 @@ module.exports = {
   createBusinessProofHandler,
   createFacilitatorClient,
   createApiDiscoveryHandler,
+  createWellKnownX402AurelianHandler,
   createHealthHandler,
   createMercTrustEnforcementFromEnv,
   createMetricsAttribution,
