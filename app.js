@@ -181,6 +181,677 @@ function createBundledSellerRouteConfig() {
   return entries;
 }
 
+function createExpandedRouteConfig(payTo = PAY_TO) {
+  return {
+    "GET /api/stocks/quote/*": createPricedRoute({
+      price: "0.008",
+      description:
+        "Real-time stock quote by ticker symbol, with automatic fallback providers when primary data is unavailable.",
+      category: "data/finance",
+      tags: ["stocks", "quote", "markets"],
+      payTo,
+      resourcePath: "/api/stocks/quote/AAPL",
+      outputExample: {
+        success: true,
+        data: { symbol: "AAPL", price: 217.45, change: 1.24, percentChange: 0.57 },
+        source: "Finnhub",
+      },
+    }),
+    "GET /api/stocks/search": createPricedRoute({
+      price: "0.008",
+      description: "Search stock symbols and names.",
+      category: "data/finance",
+      tags: ["stocks", "search", "markets"],
+      payTo,
+      resourcePath: "/api/stocks/search",
+      queryExample: { q: "apple" },
+      querySchema: {
+        properties: {
+          q: { type: "string", description: "Company name or ticker query" },
+          limit: { type: "string", description: "Max results to return" },
+        },
+        required: ["q"],
+        additionalProperties: false,
+      },
+      outputExample: {
+        success: true,
+        data: { query: "apple", count: 1, results: [{ symbol: "AAPL", description: "Apple Inc." }] },
+        source: "Finnhub",
+      },
+    }),
+    "GET /api/stocks/candles/*": createPricedRoute({
+      price: "0.012",
+      description: "Historical OHLCV candles for a stock symbol.",
+      category: "data/finance",
+      tags: ["stocks", "candles", "ohlcv"],
+      payTo,
+      resourcePath: "/api/stocks/candles/AAPL",
+      queryExample: { interval: "daily", limit: "30" },
+      querySchema: {
+        properties: {
+          interval: { type: "string", description: "daily or weekly" },
+          limit: { type: "string", description: "Max candles to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: {
+        success: true,
+        data: { symbol: "AAPL", interval: "daily", count: 2, candles: [{ date: "2026-03-26", close: 217.45 }] },
+        source: "Alpha Vantage",
+      },
+    }),
+    "GET /api/treasury-rates": createPricedRoute({
+      price: "0.008",
+      description: "US Treasury rates from FRED for common maturities.",
+      category: "data/finance",
+      tags: ["treasury", "rates", "fred"],
+      payTo,
+      resourcePath: "/api/treasury-rates",
+      queryExample: { series: "DGS2,DGS10", limit: "10" },
+      querySchema: {
+        properties: {
+          series: { type: "string", description: "Comma-separated FRED series ids" },
+          limit: { type: "string", description: "Max observations per series" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: {
+        success: true,
+        data: { count: 2, series: [{ seriesId: "DGS2" }, { seriesId: "DGS10" }] },
+        source: "FRED API",
+      },
+    }),
+    "GET /api/fed-funds-rate": createPricedRoute({
+      price: "0.008",
+      description: "Federal Funds Effective Rate history (FRED FEDFUNDS).",
+      category: "data/finance",
+      tags: ["fed", "rates", "fred"],
+      payTo,
+      resourcePath: "/api/fed-funds-rate",
+      queryExample: { limit: "24" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max observations to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: {
+        success: true,
+        data: { seriesId: "FEDFUNDS", latest: { date: "2026-02-01", value: 4.33 } },
+        source: "FRED API",
+      },
+    }),
+    "GET /api/yield-curve": createPricedRoute({
+      price: "0.008",
+      description: "US Treasury yield curve snapshot and spread metrics.",
+      category: "data/finance",
+      tags: ["yield-curve", "treasury", "fred"],
+      payTo,
+      resourcePath: "/api/yield-curve",
+      outputExample: {
+        success: true,
+        data: { latestDate: "2026-03-26", rates: { DGS2: 4.08, DGS10: 4.17 }, spread_10y_2y: 0.09 },
+        source: "FRED API",
+      },
+    }),
+    "GET /api/bls/jobs": createPricedRoute({
+      price: "0.008",
+      description: "BLS jobs time series (CES0000000001).",
+      category: "data/government",
+      tags: ["bls", "jobs", "labor-market"],
+      payTo,
+      resourcePath: "/api/bls/jobs",
+      queryExample: { years: "5" },
+      querySchema: {
+        properties: {
+          years: { type: "string", description: "Years of monthly history (1-20)" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { seriesId: "CES0000000001" }, source: "Bureau of Labor Statistics" },
+    }),
+    "GET /api/bls/wages": createPricedRoute({
+      price: "0.008",
+      description: "BLS wage time series (CES0500000003).",
+      category: "data/government",
+      tags: ["bls", "wages", "earnings"],
+      payTo,
+      resourcePath: "/api/bls/wages",
+      queryExample: { years: "5" },
+      querySchema: {
+        properties: {
+          years: { type: "string", description: "Years of monthly history (1-20)" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { seriesId: "CES0500000003" }, source: "Bureau of Labor Statistics" },
+    }),
+    "GET /api/bls/pce": createPricedRoute({
+      price: "0.008",
+      description: "PCE inflation index from FRED (PCEPI).",
+      category: "data/government",
+      tags: ["fred", "pce", "inflation"],
+      payTo,
+      resourcePath: "/api/bls/pce",
+      queryExample: { years: "5" },
+      querySchema: {
+        properties: {
+          years: { type: "string", description: "Years of monthly history (1-20)" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { seriesId: "PCEPI" }, source: "FRED API" },
+    }),
+    "GET /api/census/housing": createPricedRoute({
+      price: "0.008",
+      description: "Census housing and renter/owner occupancy indicators.",
+      category: "data/government",
+      tags: ["census", "housing", "demographics"],
+      payTo,
+      resourcePath: "/api/census/housing",
+      queryExample: { state: "06" },
+      querySchema: {
+        properties: {
+          state: { type: "string", description: "2-digit state FIPS code" },
+          zip: { type: "string", description: "5-digit ZIP code" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { survey: "ACS 5-Year Estimates (2022)" }, source: "US Census Bureau API" },
+    }),
+    "GET /api/census/income/*": createPricedRoute({
+      price: "0.008",
+      description: "Census income profile for a 5-digit ZIP code.",
+      category: "data/government",
+      tags: ["census", "income", "zip"],
+      payTo,
+      resourcePath: "/api/census/income/20002",
+      outputExample: { success: true, data: { zip: "20002", medianHouseholdIncome: 106500 }, source: "US Census Bureau API" },
+    }),
+    "GET /api/census/age-breakdown": createPricedRoute({
+      price: "0.008",
+      description: "Census age and sex breakdown by geography.",
+      category: "data/government",
+      tags: ["census", "demographics", "age"],
+      payTo,
+      resourcePath: "/api/census/age-breakdown",
+      queryExample: { state: "06" },
+      querySchema: {
+        properties: {
+          state: { type: "string", description: "2-digit state FIPS code" },
+          zip: { type: "string", description: "5-digit ZIP code" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { totalPopulation: 39356104 }, source: "US Census Bureau API" },
+    }),
+    "GET /api/fda/drug-labels/*": createPricedRoute({
+      price: "0.008",
+      description: "openFDA drug labeling and warnings by drug name.",
+      category: "data/health",
+      tags: ["fda", "drug-labels", "safety"],
+      payTo,
+      resourcePath: "/api/fda/drug-labels/aspirin",
+      queryExample: { limit: "10" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max records to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { drug: "aspirin", count: 3 }, source: "openFDA Drug Label API" },
+    }),
+    "GET /api/fda/drug-events/*": createPricedRoute({
+      price: "0.008",
+      description: "Alias path for openFDA adverse event reports by drug.",
+      category: "data/health",
+      tags: ["fda", "drug-safety", "adverse-events"],
+      payTo,
+      resourcePath: "/api/fda/drug-events/aspirin",
+      queryExample: { limit: "10" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max records to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { drug: "aspirin", count: 10 }, source: "openFDA Drug Adverse Events API" },
+    }),
+    "GET /api/fda/medical-devices": createPricedRoute({
+      price: "0.008",
+      description: "openFDA medical device adverse events.",
+      category: "data/health",
+      tags: ["fda", "medical-devices", "adverse-events"],
+      payTo,
+      resourcePath: "/api/fda/medical-devices",
+      queryExample: { query: "pump", limit: "10" },
+      querySchema: {
+        properties: {
+          query: { type: "string", description: "Optional keyword filter" },
+          limit: { type: "string", description: "Max records to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { count: 10 }, source: "openFDA Device Event API" },
+    }),
+    "GET /api/fda/device-recalls": createPricedRoute({
+      price: "0.008",
+      description: "openFDA device recall events.",
+      category: "data/health",
+      tags: ["fda", "medical-devices", "recalls"],
+      payTo,
+      resourcePath: "/api/fda/device-recalls",
+      queryExample: { query: "pacemaker", limit: "10" },
+      querySchema: {
+        properties: {
+          query: { type: "string", description: "Optional keyword filter" },
+          limit: { type: "string", description: "Max records to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { count: 10 }, source: "openFDA Device Recall API" },
+    }),
+    "GET /api/fda/ndc/*": createPricedRoute({
+      price: "0.008",
+      description: "Lookup drug record by National Drug Code (NDC).",
+      category: "data/health",
+      tags: ["fda", "ndc", "drug-directory"],
+      payTo,
+      resourcePath: "/api/fda/ndc/00597-0152",
+      outputExample: { success: true, data: { ndc: "00597-0152", count: 1 }, source: "openFDA NDC API" },
+    }),
+    "GET /api/weather/historical": createPricedRoute({
+      price: "0.006",
+      description: "Historical weather daily series for a coordinate and date range.",
+      category: "real-time-data/weather",
+      tags: ["weather", "historical", "climate"],
+      payTo,
+      resourcePath: "/api/weather/historical",
+      queryExample: { lat: "40.7128", lon: "-74.0060", start: "2026-03-01", end: "2026-03-07" },
+      querySchema: {
+        properties: {
+          lat: { type: "string", description: "Latitude in decimal degrees" },
+          lon: { type: "string", description: "Longitude in decimal degrees" },
+          start: { type: "string", description: "Start date YYYY-MM-DD" },
+          end: { type: "string", description: "End date YYYY-MM-DD" },
+        },
+        required: ["lat", "lon", "start", "end"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { startDate: "2026-03-01", endDate: "2026-03-07" }, source: "Open-Meteo Historical API" },
+    }),
+    "GET /api/weather/alerts/*": createPricedRoute({
+      price: "0.006",
+      description: "Active NWS weather alerts for a US state code.",
+      category: "real-time-data/weather",
+      tags: ["weather", "alerts", "noaa"],
+      payTo,
+      resourcePath: "/api/weather/alerts/TX",
+      outputExample: { success: true, data: { state: "TX", count: 2 }, source: "NWS Alerts API" },
+    }),
+    "GET /api/weather/marine": createPricedRoute({
+      price: "0.006",
+      description: "Marine wave and swell forecast for a coordinate.",
+      category: "real-time-data/weather",
+      tags: ["weather", "marine", "ocean"],
+      payTo,
+      resourcePath: "/api/weather/marine",
+      queryExample: { lat: "29.76", lon: "-95.36", hours: "24" },
+      querySchema: {
+        properties: {
+          lat: { type: "string", description: "Latitude in decimal degrees" },
+          lon: { type: "string", description: "Longitude in decimal degrees" },
+          hours: { type: "string", description: "Hour count to return" },
+        },
+        required: ["lat", "lon"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { count: 24 }, source: "Open-Meteo Marine API" },
+    }),
+    "GET /api/weather/air-quality": createPricedRoute({
+      price: "0.008",
+      description: "Alias path for AQI by ZIP. Query with ?zip=20002.",
+      category: "real-time-data/weather",
+      tags: ["air-quality", "aqi", "weather"],
+      payTo,
+      resourcePath: "/api/weather/air-quality",
+      queryExample: { zip: "20002" },
+      querySchema: {
+        properties: {
+          zip: { type: "string", description: "US ZIP code" },
+        },
+        required: ["zip"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { zip: "20002", overallAqi: 39 }, source: "EPA AirNow API" },
+    }),
+    "GET /api/uv-index/*": createPricedRoute({
+      price: "0.006",
+      description: "UV index forecast for exact latitude/longitude path input.",
+      category: "real-time-data/weather",
+      tags: ["weather", "uv-index", "forecast"],
+      payTo,
+      resourcePath: "/api/uv-index/40.7128/-74.0060",
+      outputExample: { success: true, data: { current: { uvIndex: 4.2 } }, source: "Open-Meteo API" },
+    }),
+    "GET /api/geocode": createPricedRoute({
+      price: "0.006",
+      description: "Forward geocoding from address/query text to coordinates.",
+      category: "data/location",
+      tags: ["geocode", "location", "osm"],
+      payTo,
+      resourcePath: "/api/geocode",
+      queryExample: { q: "1600 Pennsylvania Ave NW, Washington, DC", limit: "3" },
+      querySchema: {
+        properties: {
+          q: { type: "string", description: "Address or place query" },
+          limit: { type: "string", description: "Max candidates to return" },
+        },
+        required: ["q"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { query: "Washington, DC", count: 1 }, source: "Nominatim" },
+    }),
+    "GET /api/reverse-geocode": createPricedRoute({
+      price: "0.006",
+      description: "Reverse geocoding from coordinates to address components.",
+      category: "data/location",
+      tags: ["reverse-geocode", "location", "osm"],
+      payTo,
+      resourcePath: "/api/reverse-geocode",
+      queryExample: { lat: "40.7128", lon: "-74.0060" },
+      querySchema: {
+        properties: {
+          lat: { type: "string", description: "Latitude in decimal degrees" },
+          lon: { type: "string", description: "Longitude in decimal degrees" },
+        },
+        required: ["lat", "lon"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { latitude: 40.7128, longitude: -74.006 }, source: "Nominatim" },
+    }),
+    "GET /api/timezone/*": createPricedRoute({
+      price: "0.006",
+      description: "Resolve timezone and local clock by coordinates with fallback providers.",
+      category: "data/location",
+      tags: ["timezone", "location", "time"],
+      payTo,
+      resourcePath: "/api/timezone/40.7128/-74.0060",
+      outputExample: { success: true, data: { timezone: "America/New_York" }, source: "timeapi.io" },
+    }),
+    "GET /api/zipcode/*": createPricedRoute({
+      price: "0.006",
+      description: "Lookup ZIP code geography and coordinates.",
+      category: "data/location",
+      tags: ["zipcode", "location", "postal"],
+      payTo,
+      resourcePath: "/api/zipcode/10001",
+      outputExample: { success: true, data: { zip: "10001", country: "US" }, source: "Zippopotam.us" },
+    }),
+    "GET /api/elevation/*": createPricedRoute({
+      price: "0.006",
+      description: "Lookup elevation for exact coordinate input.",
+      category: "data/location",
+      tags: ["elevation", "location", "terrain"],
+      payTo,
+      resourcePath: "/api/elevation/40.7128/-74.0060",
+      outputExample: { success: true, data: { elevation_m: 10 }, source: "Open-Elevation" },
+    }),
+    "GET /api/whois/*": createPricedRoute({
+      price: "0.006",
+      description: "WHOIS/RDAP lookup for a domain.",
+      category: "data/network-intelligence",
+      tags: ["whois", "rdap", "domain"],
+      payTo,
+      resourcePath: "/api/whois/example.com",
+      outputExample: { success: true, data: { domain: "example.com" }, source: "RDAP.org" },
+    }),
+    "GET /api/dns/*": createPricedRoute({
+      price: "0.006",
+      description: "DNS lookup by domain with record type option and provider fallback.",
+      category: "data/network-intelligence",
+      tags: ["dns", "domain", "network"],
+      payTo,
+      resourcePath: "/api/dns/example.com",
+      queryExample: { type: "A" },
+      querySchema: {
+        properties: {
+          type: { type: "string", description: "DNS record type (A, AAAA, MX, TXT, NS)" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { domain: "example.com", type: "A", count: 1 }, source: "Cloudflare DoH" },
+    }),
+    "GET /api/ssl/*": createPricedRoute({
+      price: "0.006",
+      description: "SSL certificate issuer and expiry inspection for a domain.",
+      category: "data/network-intelligence",
+      tags: ["ssl", "tls", "domain"],
+      payTo,
+      resourcePath: "/api/ssl/example.com",
+      outputExample: { success: true, data: { domain: "example.com", validTo: "2026-11-20T00:00:00.000Z" }, source: "ssl-checker.io" },
+    }),
+    "GET /api/domain-availability/*": createPricedRoute({
+      price: "0.012",
+      description: "Domain availability estimate with paid provider and RDAP heuristic fallback.",
+      category: "data/network-intelligence",
+      tags: ["domain", "availability", "whois"],
+      payTo,
+      resourcePath: "/api/domain-availability/example.com",
+      outputExample: { success: true, data: { domain: "example.com", available: false }, source: "WhoisJSON" },
+    }),
+    "GET /api/sec/filings/*": createPricedRoute({
+      price: "0.006",
+      description: "Recent SEC EDGAR filings by ticker.",
+      category: "data/government",
+      tags: ["sec", "edgar", "filings"],
+      payTo,
+      resourcePath: "/api/sec/filings/AAPL",
+      queryExample: { limit: "10" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max filing rows to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { ticker: "AAPL", count: 10 }, source: "SEC EDGAR API" },
+    }),
+    "GET /api/sec/company-facts/*": createPricedRoute({
+      price: "0.006",
+      description: "SEC company facts (XBRL) by ticker.",
+      category: "data/government",
+      tags: ["sec", "xbrl", "financials"],
+      payTo,
+      resourcePath: "/api/sec/company-facts/AAPL",
+      outputExample: { success: true, data: { ticker: "AAPL", cik: "0000320193" }, source: "SEC EDGAR API" },
+    }),
+    "GET /api/sec/insider-trades/*": createPricedRoute({
+      price: "0.006",
+      description: "SEC Form 4 insider trades by ticker.",
+      category: "data/government",
+      tags: ["sec", "insider-trading", "form-4"],
+      payTo,
+      resourcePath: "/api/sec/insider-trades/AAPL",
+      queryExample: { limit: "10" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max rows to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { ticker: "AAPL", count: 10 }, source: "SEC EDGAR API" },
+    }),
+    "GET /api/sanctions/*": createPricedRoute({
+      price: "0.006",
+      description: "OFAC sanctions screening alias route with grouped match signals.",
+      category: "data/government",
+      tags: ["ofac", "sanctions", "compliance"],
+      payTo,
+      resourcePath: "/api/sanctions/SBERBANK",
+      queryExample: { minScore: "90", limit: "5" },
+      querySchema: {
+        properties: {
+          minScore: { type: "string", description: "Minimum OFAC name score" },
+          limit: { type: "string", description: "Max grouped matches to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { summary: { matchCount: 1 } }, source: "OFAC Sanctions List Service" },
+    }),
+    "GET /api/courts/cases": createPricedRoute({
+      price: "0.006",
+      description: "CourtListener docket/case search.",
+      category: "data/government",
+      tags: ["courts", "cases", "legal"],
+      payTo,
+      resourcePath: "/api/courts/cases",
+      queryExample: { query: "antitrust", limit: "20" },
+      querySchema: {
+        properties: {
+          query: { type: "string", description: "Search text" },
+          limit: { type: "string", description: "Max rows to return" },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { query: "antitrust", count: 20 }, source: "CourtListener API" },
+    }),
+    "GET /api/courts/opinions/*": createPricedRoute({
+      price: "0.006",
+      description: "CourtListener opinion search by path query.",
+      category: "data/government",
+      tags: ["courts", "opinions", "legal"],
+      payTo,
+      resourcePath: "/api/courts/opinions/antitrust",
+      queryExample: { limit: "20" },
+      querySchema: {
+        properties: {
+          limit: { type: "string", description: "Max rows to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { query: "antitrust", count: 20 }, source: "CourtListener API" },
+    }),
+    "GET /api/sports/scores/*": createPricedRoute({
+      price: "0.008",
+      description: "Live/recent scores by sport with provider fallback.",
+      category: "real-time-data/sports",
+      tags: ["sports", "scores", "live-data"],
+      payTo,
+      resourcePath: "/api/sports/scores/nfl",
+      queryExample: { date: "20260327", limit: "25" },
+      querySchema: {
+        properties: {
+          date: { type: "string", description: "Date as YYYYMMDD" },
+          limit: { type: "string", description: "Max games to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { sport: "nfl", count: 10 }, source: "TheSportsDB" },
+    }),
+    "GET /api/sports/standings/*": createPricedRoute({
+      price: "0.008",
+      description: "League standings by sport.",
+      category: "real-time-data/sports",
+      tags: ["sports", "standings", "rankings"],
+      payTo,
+      resourcePath: "/api/sports/standings/nfl",
+      queryExample: { season: "2025" },
+      querySchema: {
+        properties: {
+          season: { type: "string", description: "Season value, e.g. 2025" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { sport: "nfl", count: 32 }, source: "TheSportsDB" },
+    }),
+    "GET /api/sports/schedule/*": createPricedRoute({
+      price: "0.008",
+      description: "Team schedule by team path with optional sport/date filters.",
+      category: "real-time-data/sports",
+      tags: ["sports", "schedule", "team-data"],
+      payTo,
+      resourcePath: "/api/sports/schedule/Patriots",
+      queryExample: { sport: "nfl", date: "20260327", limit: "25" },
+      querySchema: {
+        properties: {
+          sport: { type: "string", description: "Sport slug (nfl, nba, mlb, ...)" },
+          date: { type: "string", description: "Date as YYYYMMDD" },
+          limit: { type: "string", description: "Max games to return" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { teamQuery: "Patriots", count: 17 }, source: "TheSportsDB" },
+    }),
+    "GET /api/sports/odds/*": createPricedRoute({
+      price: "0.012",
+      description: "Live sports odds by sport with bookmaker market snapshots.",
+      category: "real-time-data/sports",
+      tags: ["sports", "odds", "betting"],
+      payTo,
+      resourcePath: "/api/sports/odds/nfl",
+      queryExample: { regions: "us", markets: "h2h,spreads,totals" },
+      querySchema: {
+        properties: {
+          regions: { type: "string", description: "Comma-separated region codes" },
+          markets: { type: "string", description: "Comma-separated market keys" },
+          oddsFormat: { type: "string", description: "Odds format (american, decimal)" },
+          dateFormat: { type: "string", description: "Date format (iso, unix)" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { sport: "nfl", eventCount: 12 }, source: "The Odds API" },
+    }),
+    "GET /api/worldbank/*": createPricedRoute({
+      price: "0.006",
+      description: "World Bank indicator time series by country and indicator code.",
+      category: "data/world",
+      tags: ["worldbank", "economics", "indicators"],
+      payTo,
+      resourcePath: "/api/worldbank/US/NY.GDP.MKTP.CD",
+      queryExample: { date: "2018:2025", perPage: "100" },
+      querySchema: {
+        properties: {
+          date: { type: "string", description: "Optional date range (YYYY:YYYY)" },
+          perPage: { type: "string", description: "Rows per page from World Bank" },
+        },
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { country: "US", indicator: "NY.GDP.MKTP.CD" }, source: "World Bank API" },
+    }),
+    "GET /api/country/*": createPricedRoute({
+      price: "0.006",
+      description: "Country profile by ISO code from RestCountries.",
+      category: "data/world",
+      tags: ["country", "demographics", "reference"],
+      payTo,
+      resourcePath: "/api/country/US",
+      outputExample: { success: true, data: { code: "US", name: "United States" }, source: "RestCountries" },
+    }),
+    "GET /api/patents/search": createPricedRoute({
+      price: "0.006",
+      description: "Patent search endpoint with optional EPO fallback when configured.",
+      category: "data/world",
+      tags: ["patents", "innovation", "research"],
+      payTo,
+      resourcePath: "/api/patents/search",
+      queryExample: { q: "battery", page: "1", perPage: "20" },
+      querySchema: {
+        properties: {
+          q: { type: "string", description: "Search phrase" },
+          page: { type: "string", description: "Page number" },
+          perPage: { type: "string", description: "Rows per page" },
+          fromDate: { type: "string", description: "Start date YYYY-MM-DD" },
+          toDate: { type: "string", description: "End date YYYY-MM-DD" },
+        },
+        required: ["q"],
+        additionalProperties: false,
+      },
+      outputExample: { success: true, data: { query: "battery", count: 20 }, source: "PatentsView API" },
+    }),
+  };
+}
+
 function createRouteConfig(payTo = PAY_TO) {
   return {
     "GET /api/vin/*": createPricedRoute({
@@ -727,6 +1398,7 @@ function createRouteConfig(payTo = PAY_TO) {
         source: "Congress.gov API",
       },
     }),
+    ...createExpandedRouteConfig(payTo),
     ...createBundledSellerRouteConfig(),
   };
 }
@@ -1395,6 +2067,7 @@ function createHeadProtectedPaymentGate(paymentGate, routes = routeConfig) {
 
 function mountPaidRoutes(target) {
   target.use(require("./routes/vin"));
+  target.use(require("./routes/stocks"));
   target.use(require("./routes/weather"));
   target.use(require("./routes/holidays"));
   target.use(require("./routes/exchange-rates"));
@@ -1406,6 +2079,11 @@ function mountPaidRoutes(target) {
   target.use(require("./routes/bls"));
   target.use(require("./routes/air-quality"));
   target.use(require("./routes/congress"));
+  target.use(require("./routes/location"));
+  target.use(require("./routes/domain-intel"));
+  target.use(require("./routes/legal"));
+  target.use(require("./routes/sports"));
+  target.use(require("./routes/world-data"));
 
   for (const route of getBundledSellerRoutes()) {
     const method = String(route?.method || "").toLowerCase();

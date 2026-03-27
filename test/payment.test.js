@@ -182,6 +182,34 @@ test("main app bucket includes restricted-party and vendor-entity-brief routes",
   });
 });
 
+test("api discovery includes representative all-tier expansion endpoints", async () => {
+  const app = createApp({
+    enableDebugRoutes: false,
+    facilitatorLoader: async () => createStubFacilitator(),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api`);
+    const body = await response.json();
+    const routeKeys = new Set(body.catalog.map((entry) => entry.routeKey));
+
+    assert.equal(response.status, 200);
+    assert.ok(routeKeys.has("GET /api/stocks/quote/*"));
+    assert.ok(routeKeys.has("GET /api/stocks/search"));
+    assert.ok(routeKeys.has("GET /api/treasury-rates"));
+    assert.ok(routeKeys.has("GET /api/weather/historical"));
+    assert.ok(routeKeys.has("GET /api/weather/air-quality"));
+    assert.ok(routeKeys.has("GET /api/census/income/*"));
+    assert.ok(routeKeys.has("GET /api/fda/drug-events/*"));
+    assert.ok(routeKeys.has("GET /api/geocode"));
+    assert.ok(routeKeys.has("GET /api/dns/*"));
+    assert.ok(routeKeys.has("GET /api/sec/filings/*"));
+    assert.ok(routeKeys.has("GET /api/sports/odds/*"));
+    assert.ok(routeKeys.has("GET /api/worldbank/*"));
+    assert.ok(routeKeys.has("GET /api/patents/search"));
+  });
+});
+
 test("protected routes return x402 payment requirements without a payment header", async () => {
   const app = createApp({
     enableDebugRoutes: false,
@@ -396,6 +424,123 @@ test("query-driven routes advertise stable canonical resource URLs", async () =>
       path: "/api/congress/bills?congress=119&limit=20",
       expectedResource:
         "https://x402-data-bazaar.vercel.app/api/congress/bills",
+    },
+    {
+      path: "/api/stocks/search?q=apple&limit=5",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/stocks/search",
+    },
+    {
+      path: "/api/stocks/candles/AAPL?interval=daily&limit=10",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/stocks/candles/AAPL",
+    },
+    {
+      path: "/api/weather/historical?lat=40.7128&lon=-74.0060&start=2026-03-01&end=2026-03-07",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/weather/historical",
+    },
+    {
+      path: "/api/weather/marine?lat=40.7128&lon=-74.0060&hours=24",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/weather/marine",
+    },
+    {
+      path: "/api/weather/air-quality?zip=20002",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/weather/air-quality",
+    },
+    {
+      path: "/api/census/housing?state=06",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/census/housing",
+    },
+    {
+      path: "/api/census/age-breakdown?state=06",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/census/age-breakdown",
+    },
+    {
+      path: "/api/fda/medical-devices?query=pump&limit=10",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/fda/medical-devices",
+    },
+    {
+      path: "/api/fda/device-recalls?query=pacemaker&limit=10",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/fda/device-recalls",
+    },
+    {
+      path: "/api/geocode?q=Chicago&limit=3",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/geocode",
+    },
+    {
+      path: "/api/courts/cases?query=antitrust&limit=5",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/courts/cases",
+    },
+    {
+      path: "/api/patents/search?q=battery&limit=5",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/patents/search",
+    },
+  ];
+
+  await withServer(app, async (baseUrl) => {
+    for (const testCase of cases) {
+      const response = await fetch(`${baseUrl}${testCase.path}`);
+      const paymentRequired = decodePaymentRequiredHeader(
+        response.headers.get("payment-required"),
+      );
+
+      assert.equal(response.status, 402);
+      assert.equal(paymentRequired.resource.url, testCase.expectedResource);
+    }
+  });
+});
+
+test("path aliases and new path routes advertise stable canonical resource URLs", async () => {
+  const app = createApp({
+    enableDebugRoutes: false,
+    facilitatorLoader: async () => createStubFacilitator(),
+  });
+
+  const cases = [
+    {
+      path: "/api/fda/drug-events/aspirin?limit=5",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/fda/drug-events/aspirin",
+    },
+    {
+      path: "/api/census/income/20002",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/census/income/20002",
+    },
+    {
+      path: "/api/uv-index/40.7128/-74.0060",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/uv-index/40.7128/-74.0060",
+    },
+    {
+      path: "/api/sec/filings/AAPL",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/sec/filings/AAPL",
+    },
+    {
+      path: "/api/dns/example.com",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/dns/example.com",
+    },
+    {
+      path: "/api/sports/odds/nfl?regions=us",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/sports/odds/nfl",
+    },
+    {
+      path: "/api/worldbank/US/NY.GDP.MKTP.CD?date=2020:2025",
+      expectedResource:
+        "https://x402-data-bazaar.vercel.app/api/worldbank/US/NY.GDP.MKTP.CD",
     },
   ];
 

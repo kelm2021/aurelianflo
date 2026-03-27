@@ -1,16 +1,33 @@
 const fetch = require("node-fetch");
 const { Router } = require("express");
+const airQualityRoutes = require("./air-quality");
+
 const router = Router();
 
 const WEATHER_CODES = {
-  0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
-  45: "Fog", 48: "Depositing rime fog",
-  51: "Light drizzle", 53: "Moderate drizzle", 55: "Dense drizzle",
-  61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
-  71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow",
-  80: "Slight rain showers", 81: "Moderate rain showers", 82: "Violent rain showers",
-  85: "Slight snow showers", 86: "Heavy snow showers",
-  95: "Thunderstorm", 96: "Thunderstorm with slight hail", 99: "Thunderstorm with heavy hail",
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Fog",
+  48: "Depositing rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  61: "Slight rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  71: "Slight snow",
+  73: "Moderate snow",
+  75: "Heavy snow",
+  80: "Slight rain showers",
+  81: "Moderate rain showers",
+  82: "Violent rain showers",
+  85: "Slight snow showers",
+  86: "Heavy snow showers",
+  95: "Thunderstorm",
+  96: "Thunderstorm with slight hail",
+  99: "Thunderstorm with heavy hail",
 };
 
 function roundWeatherValue(value) {
@@ -22,6 +39,31 @@ function getCoordinates(req) {
     lat: req.params.lat ?? req.query.lat,
     lon: req.params.lon ?? req.query.lon,
   };
+}
+
+function parseIsoDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return null;
+  }
+
+  const date = new Date(`${text}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toISOString().slice(0, 10) === text ? text : null;
+}
+
+function getDayDifference(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  return Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+function normalizeUsState(value) {
+  const state = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(state) ? state : null;
 }
 
 function buildHourlyDecisionWindow(raw, hours = 12) {
@@ -64,9 +106,12 @@ function buildDecisionBrief(current, hourlyWindow) {
       (entry.precipitation_probability_pct ?? 0) >= 45 || (entry.precipitation_in ?? 0) >= 0.01,
   );
   const severeWindow = hourlyWindow.some((entry) => (entry.weather_code ?? 0) >= 95);
-  const coatRecommended = (current.feels_like_f ?? 999) < 55 || minFeelsLike < 50 || maxWindSpeed >= 18;
+  const coatRecommended =
+    (current.feels_like_f ?? 999) < 55 || minFeelsLike < 50 || maxWindSpeed >= 18;
   const umbrellaRecommended =
-    (current.precipitation_in ?? 0) >= 0.01 || Boolean(firstWetHour) || maxPrecipitationProbability >= 45;
+    (current.precipitation_in ?? 0) >= 0.01 ||
+    Boolean(firstWetHour) ||
+    maxPrecipitationProbability >= 45;
 
   let outdoorScore = 100;
   if ((current.feels_like_f ?? 72) < 32 || (current.feels_like_f ?? 72) > 95) {
@@ -134,7 +179,11 @@ async function handleCurrentWeather(req, res) {
     }
 
     const resp = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m&hourly=apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=2&timezone=auto`
+      "https://api.open-meteo.com/v1/forecast" +
+        `?latitude=${lat}&longitude=${lon}` +
+        "&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m" +
+        "&hourly=apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m" +
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&forecast_days=2&timezone=auto",
     );
     const raw = await resp.json();
     const c = raw.current;
@@ -154,7 +203,7 @@ async function handleCurrentWeather(req, res) {
       time: c.time,
     };
 
-    res.json({
+    return res.json({
       success: true,
       data: {
         ...current,
@@ -164,7 +213,9 @@ async function handleCurrentWeather(req, res) {
       source: "Open-Meteo API",
     });
   } catch (err) {
-    res.status(502).json({ success: false, error: "Upstream API error", details: err.message });
+    return res
+      .status(502)
+      .json({ success: false, error: "Upstream API error", details: err.message });
   }
 }
 
@@ -177,34 +228,255 @@ router.get("/api/weather/forecast", async (req, res) => {
     const lon = req.query.lon ?? "-74.0060";
     const { days } = req.query;
 
-    const forecastDays = Math.min(parseInt(days) || 7, 16);
+    const forecastDays = Math.min(parseInt(days, 10) || 7, 16);
     const resp = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,wind_speed_10m_max&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto&forecast_days=${forecastDays}`
+      "https://api.open-meteo.com/v1/forecast" +
+        `?latitude=${lat}&longitude=${lon}` +
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,wind_speed_10m_max" +
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto" +
+        `&forecast_days=${forecastDays}`,
     );
     const raw = await resp.json();
-    const d = raw.daily;
+    const daily = raw.daily;
 
-    const forecast = d.time.map((date, i) => ({
+    const forecast = daily.time.map((date, index) => ({
       date,
-      high_f: d.temperature_2m_max[i],
-      low_f: d.temperature_2m_min[i],
-      precipitation_in: d.precipitation_sum[i],
-      precip_chance_pct: d.precipitation_probability_max[i],
-      wind_max_mph: d.wind_speed_10m_max[i],
-      condition: WEATHER_CODES[d.weather_code[i]] || "Unknown",
+      high_f: daily.temperature_2m_max[index],
+      low_f: daily.temperature_2m_min[index],
+      precipitation_in: daily.precipitation_sum[index],
+      precip_chance_pct: daily.precipitation_probability_max[index],
+      wind_max_mph: daily.wind_speed_10m_max[index],
+      condition: WEATHER_CODES[daily.weather_code[index]] || "Unknown",
     }));
 
-    res.json({
+    return res.json({
       success: true,
       data: { latitude: raw.latitude, longitude: raw.longitude, timezone: raw.timezone, forecast },
       source: "Open-Meteo API",
     });
   } catch (err) {
-    res.status(502).json({ success: false, error: "Upstream API error", details: err.message });
+    return res
+      .status(502)
+      .json({ success: false, error: "Upstream API error", details: err.message });
+  }
+});
+
+router.get("/api/weather/historical", async (req, res) => {
+  try {
+    const { lat, lon } = getCoordinates(req);
+    const start = parseIsoDate(req.query.start);
+    const end = parseIsoDate(req.query.end);
+    if (!lat || !lon) {
+      return res.status(400).json({ success: false, error: "lat and lon are required" });
+    }
+    if (!start || !end) {
+      return res
+        .status(400)
+        .json({ success: false, error: "start and end must be ISO dates (YYYY-MM-DD)" });
+    }
+    if (getDayDifference(start, end) < 0) {
+      return res.status(400).json({ success: false, error: "end date must be on or after start date" });
+    }
+    if (getDayDifference(start, end) > 31) {
+      return res.status(400).json({ success: false, error: "date range cannot exceed 31 days" });
+    }
+
+    const response = await fetch(
+      "https://archive-api.open-meteo.com/v1/archive" +
+        `?latitude=${lat}&longitude=${lon}&start_date=${start}&end_date=${end}` +
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max" +
+        "&temperature_unit=fahrenheit&wind_speed_unit=mph&precipitation_unit=inch&timezone=auto",
+    );
+    const raw = await response.json();
+    const daily = raw.daily || {};
+    const times = Array.isArray(daily.time) ? daily.time : [];
+    const history = times.map((time, index) => ({
+      date: time,
+      temp_max_f: daily.temperature_2m_max?.[index] ?? null,
+      temp_min_f: daily.temperature_2m_min?.[index] ?? null,
+      precipitation_in: daily.precipitation_sum?.[index] ?? null,
+      wind_max_mph: daily.wind_speed_10m_max?.[index] ?? null,
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        latitude: raw.latitude,
+        longitude: raw.longitude,
+        timezone: raw.timezone,
+        startDate: start,
+        endDate: end,
+        daily: history,
+      },
+      source: "Open-Meteo Historical API",
+    });
+  } catch (error) {
+    return res.status(502).json({ success: false, error: "Upstream API error", details: error.message });
+  }
+});
+
+router.get("/api/weather/alerts/:state", async (req, res) => {
+  try {
+    const state = normalizeUsState(req.params.state);
+    if (!state) {
+      return res.status(400).json({ success: false, error: "state must be a 2-letter US code" });
+    }
+
+    const userAgentContact = String(process.env.UPSTREAM_CONTACT_EMAIL || "").trim();
+    const userAgent = userAgentContact
+      ? `x402-data-bazaar/1.0 (${userAgentContact})`
+      : "x402-data-bazaar/1.0";
+    const response = await fetch(`https://api.weather.gov/alerts/active/area/${state}`, {
+      headers: {
+        Accept: "application/geo+json",
+        "User-Agent": userAgent,
+      },
+    });
+    const raw = await response.json();
+    const alerts = (raw.features || []).map((feature) => {
+      const props = feature.properties || {};
+      return {
+        id: feature.id || null,
+        event: props.event || null,
+        severity: props.severity || null,
+        certainty: props.certainty || null,
+        urgency: props.urgency || null,
+        headline: props.headline || null,
+        onset: props.onset || null,
+        expires: props.expires || null,
+        areaDesc: props.areaDesc || null,
+        instruction: props.instruction || null,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: { state, count: alerts.length, alerts },
+      source: "NWS Alerts API",
+    });
+  } catch (error) {
+    return res.status(502).json({ success: false, error: "Upstream API error", details: error.message });
+  }
+});
+
+router.get("/api/weather/marine", async (req, res) => {
+  try {
+    const { lat, lon } = getCoordinates(req);
+    if (!lat || !lon) {
+      return res.status(400).json({ success: false, error: "lat and lon are required" });
+    }
+    const hours = Math.max(1, Math.min(72, Number.parseInt(String(req.query.hours || "24"), 10) || 24));
+
+    const response = await fetch(
+      "https://marine-api.open-meteo.com/v1/marine" +
+        `?latitude=${lat}&longitude=${lon}` +
+        "&hourly=wave_height,wave_direction,wave_period,wind_wave_height,swell_wave_height" +
+        "&timezone=auto&forecast_days=3",
+    );
+    const raw = await response.json();
+    const hourly = raw.hourly || {};
+    const times = Array.isArray(hourly.time) ? hourly.time.slice(0, hours) : [];
+    const forecast = times.map((time, index) => ({
+      time,
+      waveHeight_m: hourly.wave_height?.[index] ?? null,
+      waveDirection_deg: hourly.wave_direction?.[index] ?? null,
+      wavePeriod_s: hourly.wave_period?.[index] ?? null,
+      windWaveHeight_m: hourly.wind_wave_height?.[index] ?? null,
+      swellWaveHeight_m: hourly.swell_wave_height?.[index] ?? null,
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        latitude: raw.latitude,
+        longitude: raw.longitude,
+        timezone: raw.timezone,
+        count: forecast.length,
+        forecast,
+      },
+      source: "Open-Meteo Marine API",
+    });
+  } catch (error) {
+    return res.status(502).json({ success: false, error: "Upstream API error", details: error.message });
+  }
+});
+
+router.get("/api/weather/air-quality", async (req, res) => {
+  try {
+    const zip = String(req.query.zip || "").trim();
+    if (!/^\d{5}$/.test(zip)) {
+      return res
+        .status(400)
+        .json({ success: false, error: "zip query parameter is required and must be a 5-digit ZIP code" });
+    }
+
+    const data = await airQualityRoutes.fetchAirQualityByZip(zip);
+    return res.json({
+      success: true,
+      data,
+      source: "EPA AirNow API",
+    });
+  } catch (error) {
+    return res
+      .status(error.statusCode || 502)
+      .json({ success: false, error: error.statusCode ? error.message : "Upstream API error", details: error.message });
+  }
+});
+
+router.get("/api/uv-index/:lat/:lon", async (req, res) => {
+  try {
+    const { lat, lon } = getCoordinates(req);
+    const latNum = Number.parseFloat(String(lat));
+    const lonNum = Number.parseFloat(String(lon));
+    if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
+      return res.status(400).json({ success: false, error: "lat and lon must be numeric" });
+    }
+
+    const response = await fetch(
+      "https://api.open-meteo.com/v1/forecast" +
+        `?latitude=${latNum}&longitude=${lonNum}&current=uv_index&hourly=uv_index&timezone=auto&forecast_days=2`,
+    );
+    const raw = await response.json();
+    const currentUv = raw.current?.uv_index ?? null;
+    const times = Array.isArray(raw.hourly?.time) ? raw.hourly.time : [];
+    const values = Array.isArray(raw.hourly?.uv_index) ? raw.hourly.uv_index : [];
+    const next12Hours = times.slice(0, 12).map((time, index) => ({
+      time,
+      uvIndex: values[index] ?? null,
+    }));
+
+    let maxEntry = { uvIndex: null, time: null };
+    for (let index = 0; index < Math.min(24, values.length); index += 1) {
+      const value = values[index];
+      if (maxEntry.uvIndex == null || (Number.isFinite(value) && value > maxEntry.uvIndex)) {
+        maxEntry = { uvIndex: value, time: times[index] || null };
+      }
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        latitude: raw.latitude,
+        longitude: raw.longitude,
+        timezone: raw.timezone,
+        current: {
+          time: raw.current?.time ?? null,
+          uvIndex: currentUv,
+        },
+        todayMax: maxEntry,
+        next12Hours,
+      },
+      source: "Open-Meteo API",
+    });
+  } catch (error) {
+    return res.status(502).json({ success: false, error: "Upstream API error", details: error.message });
   }
 });
 
 router.buildDecisionBrief = buildDecisionBrief;
 router.buildHourlyDecisionWindow = buildHourlyDecisionWindow;
+router.parseIsoDate = parseIsoDate;
+router.normalizeUsState = normalizeUsState;
+router.getDayDifference = getDayDifference;
 
 module.exports = router;
