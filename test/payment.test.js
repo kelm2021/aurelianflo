@@ -111,6 +111,53 @@ test("api discovery endpoint lists concrete endpoint metadata without payment", 
   });
 });
 
+test("main app bucket includes restricted-party and vendor-entity-brief routes", async () => {
+  const app = createApp({
+    enableDebugRoutes: false,
+    facilitatorLoader: async () => createStubFacilitator(),
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const discoveryResponse = await fetch(`${baseUrl}/api`);
+    const discoveryBody = await discoveryResponse.json();
+    const routeKeys = new Set(discoveryBody.catalog.map((entry) => entry.routeKey));
+
+    assert.equal(discoveryResponse.status, 200);
+    assert.ok(routeKeys.has("GET /api/ofac-sanctions-screening/*"));
+    assert.ok(routeKeys.has("GET /api/vendor-onboarding/restricted-party-batch"));
+    assert.ok(routeKeys.has("GET /api/restricted-party/screen/*"));
+    assert.ok(routeKeys.has("GET /api/vendor-entity-brief"));
+
+    const cases = [
+      {
+        path: "/api/ofac-sanctions-screening/SBERBANK?minScore=90&limit=5",
+        expectedAmount: "5000",
+      },
+      {
+        path: "/api/vendor-onboarding/restricted-party-batch?names=SBERBANK%7CVTB%20BANK%20PJSC&workflow=vendor-onboarding&minScore=90&limit=3",
+        expectedAmount: "150000",
+      },
+      {
+        path: "/api/restricted-party/screen/SBERBANK?minScore=90&limit=5",
+        expectedAmount: "5000",
+      },
+      {
+        path: "/api/vendor-entity-brief?name=SBERBANK&country=CZ&minScore=90&limit=3",
+        expectedAmount: "250000",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const response = await fetch(`${baseUrl}${testCase.path}`);
+      const paymentRequired = decodePaymentRequiredHeader(response.headers.get("payment-required"));
+
+      assert.equal(response.status, 402, testCase.path);
+      assert.equal(paymentRequired.accepts[0].amount, testCase.expectedAmount, testCase.path);
+      assert.equal(paymentRequired.accepts[0].category, "identity", testCase.path);
+    }
+  });
+});
+
 test("protected routes return x402 payment requirements without a payment header", async () => {
   const app = createApp({
     enableDebugRoutes: false,
@@ -150,10 +197,18 @@ test("payment-required header includes route metadata and facilitator for indexe
 
     const rawPaymentRequired = decodeRawPaymentRequiredHeader(paymentRequiredHeader);
     const firstAccept = rawPaymentRequired.accepts[0];
+    const bazaarInfo = rawPaymentRequired.extensions?.bazaar?.info;
 
     assert.equal(firstAccept.category, "real-time-data/weather");
     assert.equal(firstAccept.maxAmountRequiredUSD, "$0.005");
     assert.equal(firstAccept.facilitator, "https://api.cdp.coinbase.com/platform/v2/x402");
+    assert.equal(bazaarInfo?.category, "real-time-data/weather");
+    assert.equal(bazaarInfo?.price, "$0.005");
+    assert.deepEqual(bazaarInfo?.tags, ["weather", "current-conditions", "decision-support"]);
+    assert.match(
+      String(bazaarInfo?.description || ""),
+      /Actionable weather decision brief/i,
+    );
   });
 });
 

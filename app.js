@@ -3,6 +3,11 @@ const {
   bazaarResourceServerExtension,
   declareDiscoveryExtension,
 } = require("@x402/extensions/bazaar");
+const restrictedPartySellerConfig = require("./apps/restricted-party-screen/seller.config.json");
+const restrictedPartyPrimaryHandler = require("./apps/restricted-party-screen/handlers/primary");
+const restrictedPartyBatchHandler = require("./apps/restricted-party-screen/handlers/batch");
+const vendorEntityBriefSellerConfig = require("./apps/vendor-entity-brief/seller.config.json");
+const vendorEntityBriefPrimaryHandler = require("./apps/vendor-entity-brief/handlers/primary");
 const {
   createMetricsAttribution,
   createMetricsDashboardHandler,
@@ -46,13 +51,38 @@ function buildCanonicalResourceUrl(resourcePath) {
 }
 
 function createDiscoveryExtension(options = {}) {
-  const { queryExample, querySchema, outputExample } = options;
+  const { category, description, tags, price, queryExample, querySchema, outputExample } = options;
 
-  return declareDiscoveryExtension({
+  const extension = declareDiscoveryExtension({
+    ...(category ? { category } : {}),
+    ...(description ? { description } : {}),
+    ...(Array.isArray(tags) && tags.length ? { tags } : {}),
     ...(queryExample ? { input: queryExample } : {}),
     ...(querySchema ? { inputSchema: querySchema } : {}),
     ...(outputExample ? { output: { example: outputExample } } : {}),
   });
+
+  if (extension?.bazaar?.info && typeof extension.bazaar.info === "object") {
+    const info = extension.bazaar.info;
+
+    if (category) {
+      info.category = category;
+    }
+
+    if (description) {
+      info.description = description;
+    }
+
+    if (Array.isArray(tags) && tags.length) {
+      info.tags = [...tags];
+    }
+
+    if (price) {
+      info.price = price;
+    }
+  }
+
+  return extension;
 }
 
 function createPricedRoute(config, legacyDescription, legacyPayTo = PAY_TO) {
@@ -91,11 +121,63 @@ function createPricedRoute(config, legacyDescription, legacyPayTo = PAY_TO) {
     ...(category ? { category } : {}),
     ...(Array.isArray(tags) ? { tags } : {}),
     extensions: createDiscoveryExtension({
+      category,
+      description,
+      tags,
+      price: normalizedPrice,
       queryExample,
       querySchema,
       outputExample,
     }),
   };
+}
+
+function getBundledSellerRoutes() {
+  const restrictedRoutes = Array.isArray(restrictedPartySellerConfig?.routes)
+    ? restrictedPartySellerConfig.routes
+    : [];
+  const vendorRoutes = Array.isArray(vendorEntityBriefSellerConfig?.routes)
+    ? vendorEntityBriefSellerConfig.routes
+    : vendorEntityBriefSellerConfig?.route
+      ? [vendorEntityBriefSellerConfig.route]
+      : [];
+
+  return [
+    ...restrictedRoutes.map((route) => ({
+      ...route,
+      payTo: restrictedPartySellerConfig?.payTo || PAY_TO,
+      seller: "restricted-party-screen",
+    })),
+    ...vendorRoutes.map((route) => ({
+      ...route,
+      payTo: vendorEntityBriefSellerConfig?.payTo || PAY_TO,
+      seller: "vendor-entity-brief",
+    })),
+  ];
+}
+
+function createBundledSellerRouteConfig() {
+  const entries = {};
+
+  for (const route of getBundledSellerRoutes()) {
+    if (!route?.key || !route?.resourcePath) {
+      continue;
+    }
+
+    const canonicalResourcePath = route.canonicalPath || route.resourcePath;
+    entries[route.key] = createPricedRoute({
+      price: route.price,
+      description: route.description,
+      payTo: route.payTo || PAY_TO,
+      resourcePath: canonicalResourcePath,
+      category: route.category,
+      tags: route.tags,
+      queryExample: route.queryExample,
+      outputExample: route.outputExample,
+    });
+  }
+
+  return entries;
 }
 
 function createRouteConfig(payTo = PAY_TO) {
@@ -644,6 +726,7 @@ function createRouteConfig(payTo = PAY_TO) {
         source: "Congress.gov API",
       },
     }),
+    ...createBundledSellerRouteConfig(),
   };
 }
 
@@ -1316,6 +1399,22 @@ function mountPaidRoutes(target) {
   target.use(require("./routes/bls"));
   target.use(require("./routes/air-quality"));
   target.use(require("./routes/congress"));
+
+  for (const route of getBundledSellerRoutes()) {
+    const method = String(route?.method || "").toLowerCase();
+    if (!method || typeof target[method] !== "function" || !route?.expressPath) {
+      continue;
+    }
+
+    let handler = restrictedPartyPrimaryHandler;
+    if (route.seller === "vendor-entity-brief") {
+      handler = vendorEntityBriefPrimaryHandler;
+    } else if (route.handlerId === "batch") {
+      handler = restrictedPartyBatchHandler;
+    }
+
+    target[method](route.expressPath, handler);
+  }
 }
 
 function createApp(options = {}) {

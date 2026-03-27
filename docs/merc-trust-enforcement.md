@@ -18,16 +18,15 @@ Set environment variables:
 MERC_TRUST_ENFORCEMENT_ENABLED=true
 MERC_TRUST_BASE_URL=https://merc-trust.vercel.app
 MERC_TRUST_FAIL_OPEN=false
+# Optional: comma-delimited route prefixes to enforce.
 MERC_TRUST_ENFORCED_PATH_PREFIXES=/api/business-days/next,/api/holidays/today
+# Optional: subset of enforced prefixes where review receipts are accepted.
 MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES=/api/business-days/next,/api/holidays/today
 ```
 
-By default, enforcement is scoped to:
+By default, no route prefixes are enforced. Set `MERC_TRUST_ENFORCED_PATH_PREFIXES` explicitly to turn route-level enforcement on.
 
-- `/api/business-days/next`
-- `/api/holidays/today`
-
-Those same low-risk prefixes accept `watch` receipts by default:
+When you set low-risk prefixes in both env vars, those prefixes accept `watch` receipts:
 
 - `review` decision
 - `review-required` guarantee

@@ -78,6 +78,8 @@ test("payment gate still runs before Merc-Trust enforcement", async () => {
     enableDebugRoutes: false,
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: (_req, res) => res.status(402).json({ error: "Payment required" }),
     mercTrustClient: {
@@ -107,6 +109,8 @@ test("missing receipt is blocked when Merc-Trust enforcement is enabled", async 
     enableDebugRoutes: false,
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: createPassingPaymentGate(),
     mercTrustClient: {
@@ -133,6 +137,8 @@ test("verification failures are blocked with 403", async () => {
     enableDebugRoutes: false,
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: createPassingPaymentGate(),
     mercTrustClient: {
@@ -162,6 +168,8 @@ test("quick-check receipts are rejected by default allowlist", async () => {
     enableDebugRoutes: false,
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: createPassingPaymentGate(),
     mercTrustClient: {
@@ -196,6 +204,8 @@ test("valid deep-check receipts pass through to route handlers", async () => {
     enableDebugRoutes: false,
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: createPassingPaymentGate(),
     mercTrustClient: {
@@ -290,6 +300,8 @@ test("fail-open allows execution when verification service errors", async () => 
     env: {
       MERC_TRUST_ENFORCEMENT_ENABLED: "true",
       MERC_TRUST_FAIL_OPEN: "true",
+      MERC_TRUST_ENFORCED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
+      MERC_TRUST_REVIEW_ALLOWED_PATH_PREFIXES: "/api/business-days/next,/api/holidays/today",
     },
     paymentGate: createPassingPaymentGate(),
     mercTrustClient: {
