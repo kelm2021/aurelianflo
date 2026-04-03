@@ -42,13 +42,13 @@ const {
 } = require("./lib/merc-trust-enforcement");
 const WELL_KNOWN_X402_AURELIAN = require("./well-known-x402-aurelian.json");
 
-const PAY_TO = "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d";
+const PAY_TO = "0x35D5C3C750712A63e5c64f83042566df5D8EF751";
 const X402_NETWORK = "eip155:8453";
 const DEFAULT_TIMEOUT_SECONDS = 60;
 const DEFAULT_402INDEX_VERIFICATION_HASH =
   "d7b41bc2cde9060ab7842783aa2747acb31f78c53d7d879047cf762a1a3063ea";
 const CANONICAL_BASE_URL = String(
-  process.env.PUBLIC_BASE_URL || "https://x402.aurelianflo.com",
+  process.env.PUBLIC_BASE_URL || "https://x402-data-bazaar.vercel.app",
 )
   .trim()
   .replace(/\/+$/, "");

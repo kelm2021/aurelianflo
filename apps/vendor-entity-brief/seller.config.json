@@ -1,6 +1,6 @@
 {
   "packageName": "vendor-entity-brief",
-  "payTo": "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d",
+  "payTo": "0x35D5C3C750712A63e5c64f83042566df5D8EF751",
   "serviceName": "Vendor Entity Brief",
   "serviceDescription": "Paid x402 API for vendor onboarding and counterparty due-diligence briefs using GLEIF entity data plus OFAC sanctions screening.",
   "baseUrl": "https://vendor-entity-brief.vercel.app",

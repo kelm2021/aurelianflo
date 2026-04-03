@@ -3,8 +3,8 @@
   "name": "AurelianFlo",
   "description": "Clean, Organized, Reliable. Real-World Data for Agents Everywhere.",
   "operator": "Aurelian Flo",
-  "website": "https://x402.aurelianflo.com",
-  "discovery": "https://x402.aurelianflo.com/api",
+  "website": "https://x402-data-bazaar.vercel.app",
+  "discovery": "https://x402-data-bazaar.vercel.app/api",
   "resources": [],
   "instructions": "# x402 Data Bazaar\n\nReal-world data APIs for AI and agentic workflows. Pay per request with USDC on Base.\n\n## Default Discovery\n- Start with the curated core 40 at `GET /api`.\n- Expand only when needed:\n  - `GET /api?profile=full`\n  - `GET /api?profile=full&surface=tools`\n  - `GET /api?profile=full&surface=data`\n\n## Discovery Contract\n- The default public manifest and discovery views prioritize the core 40.\n- Long-tail endpoints remain available through expansion catalogs instead of being front-loaded into first-contact discovery.\n\n## Payment\nUSDC on Base via x402 v2. Paid endpoints return 402 with machine-readable payment requirements until settled."
 }
