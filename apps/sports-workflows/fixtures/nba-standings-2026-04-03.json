@@ -1,0 +1,26 @@
+{
+  "as_of_date": "2026-04-03",
+  "source": "ESPN NBA standings snapshot",
+  "teams": [
+    { "name": "Detroit Pistons", "abbr": "DET", "conference": "East", "seed": 1, "wins": 56, "losses": 21, "win_pct": 0.727, "point_diff": 7.9, "last_10": "8-2" },
+    { "name": "Boston Celtics", "abbr": "BOS", "conference": "East", "seed": 2, "wins": 51, "losses": 25, "win_pct": 0.671, "point_diff": 7.2, "last_10": "8-2" },
+    { "name": "New York Knicks", "abbr": "NY", "conference": "East", "seed": 3, "wins": 49, "losses": 28, "win_pct": 0.636, "point_diff": 6.1, "last_10": "7-3" },
+    { "name": "Cleveland Cavaliers", "abbr": "CLE", "conference": "East", "seed": 4, "wins": 48, "losses": 29, "win_pct": 0.623, "point_diff": 4.1, "last_10": "7-3" },
+    { "name": "Atlanta Hawks", "abbr": "ATL", "conference": "East", "seed": 5, "wins": 44, "losses": 33, "win_pct": 0.571, "point_diff": 2.3, "last_10": "8-2" },
+    { "name": "Philadelphia 76ers", "abbr": "PHI", "conference": "East", "seed": 6, "wins": 42, "losses": 34, "win_pct": 0.553, "point_diff": -0.1, "last_10": "7-3" },
+    { "name": "Toronto Raptors", "abbr": "TOR", "conference": "East", "seed": 7, "wins": 42, "losses": 34, "win_pct": 0.553, "point_diff": 2.1, "last_10": "5-5" },
+    { "name": "Charlotte Hornets", "abbr": "CHA", "conference": "East", "seed": 8, "wins": 41, "losses": 36, "win_pct": 0.532, "point_diff": 4.8, "last_10": "7-3" },
+    { "name": "Orlando Magic", "abbr": "ORL", "conference": "East", "seed": 9, "wins": 40, "losses": 36, "win_pct": 0.526, "point_diff": -0.2, "last_10": "2-8" },
+    { "name": "Miami Heat", "abbr": "MIA", "conference": "East", "seed": 10, "wins": 40, "losses": 37, "win_pct": 0.519, "point_diff": 2.2, "last_10": "2-8" },
+    { "name": "Oklahoma City Thunder", "abbr": "OKC", "conference": "West", "seed": 1, "wins": 61, "losses": 16, "win_pct": 0.792, "point_diff": 11.4, "last_10": "9-1" },
+    { "name": "San Antonio Spurs", "abbr": "SA", "conference": "West", "seed": 2, "wins": 59, "losses": 18, "win_pct": 0.766, "point_diff": 8.5, "last_10": "10-0" },
+    { "name": "Los Angeles Lakers", "abbr": "LAL", "conference": "West", "seed": 3, "wins": 50, "losses": 27, "win_pct": 0.649, "point_diff": 1.5, "last_10": "8-2" },
+    { "name": "Denver Nuggets", "abbr": "DEN", "conference": "West", "seed": 4, "wins": 49, "losses": 28, "win_pct": 0.636, "point_diff": 4.8, "last_10": "8-2" },
+    { "name": "Houston Rockets", "abbr": "HOU", "conference": "West", "seed": 5, "wins": 47, "losses": 29, "win_pct": 0.618, "point_diff": 4.5, "last_10": "6-4" },
+    { "name": "Minnesota Timberwolves", "abbr": "MIN", "conference": "West", "seed": 6, "wins": 46, "losses": 30, "win_pct": 0.605, "point_diff": 3.7, "last_10": "6-4" },
+    { "name": "Phoenix Suns", "abbr": "PHX", "conference": "West", "seed": 7, "wins": 42, "losses": 35, "win_pct": 0.545, "point_diff": 1.5, "last_10": "3-7" },
+    { "name": "Portland Trail Blazers", "abbr": "POR", "conference": "West", "seed": 8, "wins": 39, "losses": 37, "win_pct": 0.513, "point_diff": -0.5, "last_10": "8-2" },
+    { "name": "LA Clippers", "abbr": "LAC", "conference": "West", "seed": 9, "wins": 39, "losses": 38, "win_pct": 0.506, "point_diff": 1.1, "last_10": "5-5" },
+    { "name": "Golden State Warriors", "abbr": "GS", "conference": "West", "seed": 10, "wins": 36, "losses": 41, "win_pct": 0.468, "point_diff": -0.3, "last_10": "4-6" }
+  ]
+}

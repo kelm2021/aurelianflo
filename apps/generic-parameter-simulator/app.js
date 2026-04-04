@@ -46,6 +46,7 @@ const DEFAULT_INPUT_EXAMPLE = {
     execution_quality: 0.1,
     pricing_pressure: 0.2,
   },
+  outcome_noise: 0.9,
   bias: 0,
   threshold: 0.25,
 };
@@ -53,22 +54,56 @@ const DEFAULT_INPUT_EXAMPLE = {
 const DEFAULT_OUTPUT_EXAMPLE = {
   simulation_meta: {
     simulations_run: 10000,
-    model_version: "3.0.0",
-    success_rule: "score >= threshold",
+    model_version: "3.1.0",
+    success_rule: "score + outcome_noise_draw >= threshold",
+    calibration: {
+      outcome_noise: 0.9,
+      outcome_noise_source: "default",
+    },
   },
-  outcome_probability: 0.6743,
+  outcome_probability: 0.8124,
   confidence_interval_95: {
-    low: 0.665,
-    high: 0.6835,
+    low: 0.8048,
+    high: 0.82,
   },
   score_distribution: {
-    mean: 0.3921,
-    stddev: 0.245,
-    min: -0.4821,
-    p10: 0.0783,
-    p50: 0.3915,
-    p90: 0.704,
-    max: 1.2364,
+    mean: 0.9981,
+    stddev: 0.1742,
+    min: 0.3475,
+    p05: 0.7123,
+    p10: 0.7754,
+    p25: 0.8802,
+    p50: 0.998,
+    p75: 1.1128,
+    p90: 1.2226,
+    p95: 1.2817,
+    max: 1.6187,
+  },
+  effective_score_distribution: {
+    mean: 1.0003,
+    stddev: 0.9185,
+    min: -2.1219,
+    p05: -0.5012,
+    p10: -0.1791,
+    p25: 0.3872,
+    p50: 0.9983,
+    p75: 1.6124,
+    p90: 2.1839,
+    p95: 2.5027,
+    max: 4.0218,
+  },
+  risk_metrics: {
+    probability_above_threshold: 0.8124,
+    probability_below_threshold: 0.1876,
+    expected_shortfall_05: -0.8743,
+    expected_upside_95: 2.9732,
+    threshold_gap_p50: 0.7483,
+  },
+  diagnostics: {
+    threshold: 0.25,
+    effective_score_stddev: 0.9185,
+    effective_margin_mean: 0.7503,
+    saturation_risk: "moderate",
   },
 };
 
@@ -99,13 +134,19 @@ const SIMULATION_REQUEST_SCHEMA = {
       },
       description: "Optional per-parameter standard deviation. Defaults to 0.1.",
     },
+    outcome_noise: {
+      type: "number",
+      minimum: 0,
+      description:
+        "Optional omitted-factor noise added to the simulated score before threshold evaluation. Defaults to 0.3 * sum(abs(weights)).",
+    },
     bias: {
       type: "number",
       description: "Constant term added to the simulated score.",
     },
     threshold: {
       type: "number",
-      description: "Success condition is score >= threshold.",
+      description: "Success condition is score plus optional outcome_noise draw >= threshold.",
     },
   },
   additionalProperties: false,
@@ -113,7 +154,8 @@ const SIMULATION_REQUEST_SCHEMA = {
 
 const DEFAULT_ENDPOINT_GUIDE = {
   name: "Generic probability simulation",
-  returns: "Outcome probability, confidence interval, and score distribution",
+  returns:
+    "Outcome probability, confidence interval, raw/effective score distributions, risk metrics, and calibration diagnostics",
   bestFor: "Any decision model where agents need parameter-driven probability output.",
   tips: [],
 };
@@ -121,39 +163,66 @@ const DEFAULT_ENDPOINT_GUIDE = {
 const ENDPOINT_GUIDE_BY_PATH = {
   "/api/sim/probability": {
     name: "Probability simulation",
-    returns: "Outcome probability, confidence interval, and score distribution",
+    returns:
+      "Outcome probability, confidence interval, raw/effective score distributions, risk metrics, and calibration diagnostics",
     bestFor: "Single-scenario probability checks.",
     tips: ["Use this as the baseline route for one-scenario risk estimates."],
   },
+  "/api/sim/batch-probability": {
+    name: "Batch probability simulation",
+    returns:
+      "Per-scenario calibrated probability results with raw/effective score distributions, risk metrics, diagnostics, and ranking",
+    bestFor: "Ranking many candidate scenarios in one paid call.",
+    tips: ["Each scenario entry accepts a label and either direct scenario fields or a nested `scenario` object."],
+  },
   "/api/sim/compare": {
     name: "Scenario comparison simulation",
-    returns: "Baseline vs candidate probability and uplift deltas",
+    returns:
+      "Baseline vs candidate calibrated traces, uplift deltas, paired_score_distribution, and decision_summary guidance",
     bestFor: "A/B scenario decisions and uplift checks.",
-    tips: ["Provide baseline and candidate scenarios in the request body."],
+    tips: [
+      "Provide baseline and candidate scenarios in the request body.",
+      "Use `decision_summary.preferred_scenario` and `probability_candidate_outperforms` for decision support.",
+    ],
   },
   "/api/sim/sensitivity": {
     name: "Sensitivity simulation",
-    returns: "Baseline and plus/minus variants with probability gradient for one parameter",
+    returns:
+      "Baseline and plus/minus calibrated variants with sensitivity.midpoint_elasticity, sensitivity.direction, and response_curve diagnostics",
     bestFor: "Measuring local sensitivity around a selected input parameter.",
-    tips: ["Provide `parameter`, `delta`, and optional `mode` (`absolute` or `relative`)."],
+    tips: [
+      "Provide `parameter`, `delta`, and optional `mode` (`absolute` or `relative`).",
+      "Use `response_curve.span` and `sensitivity.midpoint_elasticity` to prioritize impactful parameters.",
+    ],
   },
   "/api/sim/forecast": {
     name: "Forecast simulation",
-    returns: "Forward period-by-period probability path",
+    returns:
+      "Forward period-by-period calibrated probability path with effective score distributions and risk metrics",
     bestFor: "Time-stepped planning and near-term trajectory analysis.",
     tips: ["Set periods and drift assumptions to model expected directional changes."],
   },
   "/api/sim/composed": {
     name: "Composed simulation",
-    returns: "Weighted blended probability plus per-component simulation results",
+    returns: "Weighted blended calibrated probability plus per-component simulation traces",
     bestFor: "Portfolio-style or ensemble scenario synthesis.",
     tips: ["Each component accepts `label`, `weight`, and a `scenario` (or direct scenario fields)."],
   },
   "/api/sim/optimize": {
     name: "Optimization simulation",
-    returns: "Best parameter set by objective with baseline-vs-optimum delta",
+    returns: "Best parameter set by objective with baseline-vs-optimum calibrated simulation traces",
     bestFor: "Decision-variable tuning under bounds.",
     tips: ["Define `bounds`, set `iterations`, and choose objective `outcome_probability` or `mean_score`."],
+  },
+  "/api/sim/report": {
+    name: "Simulation report",
+    returns:
+      "Structured analyst-facing report with executive summary, headline metrics, workbook-ready tables, and raw simulation result",
+    bestFor: "Turning a simulation run into a reusable decision memo payload.",
+    tips: [
+      "Set `analysis_type` to any existing simulation mode and provide the corresponding request under `request`.",
+      "Use `export_artifacts.workbook_rows` as the direct handoff shape for XLSX generation.",
+    ],
   },
 };
 
@@ -355,7 +424,7 @@ function createHealthHandler(routes = routeConfig) {
     res.json({
       name: sellerConfig.serviceName,
       description: sellerConfig.serviceDescription,
-      version: "3.0.0",
+      version: "3.1.0",
       endpoints: catalog.length,
       catalog,
       payment: {
@@ -447,7 +516,7 @@ function createMethodologyHandler(routes = routeConfig) {
 
     res.json({
       service: "Generic Parameter Monte Carlo Simulator",
-      version: "3.0.0",
+      version: "3.1.0",
       quick_start: quickStartEntry
         ? {
             method: quickStartEntry.method,
@@ -455,6 +524,7 @@ function createMethodologyHandler(routes = routeConfig) {
             price: quickStartEntry.price,
             query: {
               sims: `Optional integer from ${MIN_SIMS} to ${MAX_SIMS}. Defaults to ${DEFAULT_SIMS}.`,
+              seed: "Optional integer seed for reproducible simulation output and canary checks.",
             },
             body: quickStartBody,
           }
@@ -473,13 +543,22 @@ function createMethodologyHandler(routes = routeConfig) {
       model: {
         score_formula: "score = bias + sum(sampled_parameter_value * weight)",
         sampling: "Each parameter is sampled from Normal(mean=parameter value, stddev=uncertainty).",
-        success_rule: "A simulation run is successful when score >= threshold.",
+        success_rule:
+          "A simulation run is successful when score plus an omitted-factor outcome-noise draw is >= threshold.",
+        reproducibility:
+          "Pass ?seed=<integer> to make endpoint outputs reproducible for regression tests and canary checks.",
         route_family:
-          "POST /api/sim/{probability|compare|sensitivity|forecast|composed|optimize}",
+          "POST /api/sim/{probability|batch-probability|compare|sensitivity|forecast|composed|optimize}",
         outputs: [
           "outcome_probability",
           "confidence_interval_95",
           "score_distribution",
+          "effective_score_distribution",
+          "risk_metrics",
+          "diagnostics",
+          "paired_score_distribution (compare)",
+          "decision_summary (compare)",
+          "response_curve (sensitivity)",
           "parameter contribution summary",
         ],
       },
@@ -525,6 +604,7 @@ function createPaidEndpointGuideHandler(routeKey, routes = routeConfig) {
         "Use POST, not GET.",
         "parameters is required and must be an object of numeric values.",
         `Use ?sims=${MIN_SIMS}..${MAX_SIMS} to tune simulation count.`,
+        "Use ?seed=<integer> to make the simulation reproducible.",
         ...endpointTips,
       ],
       sample_output: sampleOutput,
@@ -777,7 +857,7 @@ if (require.main === module) {
   const port = Number(process.env.PORT || sellerConfig.port || 4020);
 
   app.listen(port, () => {
-    console.log(`\n  ${sellerConfig.serviceName} API v3.0.0`);
+    console.log(`\n  ${sellerConfig.serviceName} API v3.1.0`);
     console.log(`  Running on http://localhost:${port}`);
     console.log(`  Payment: ${PAY_TO} on Base (${X402_NETWORK})`);
     console.log(`  Canonical base URL: ${CANONICAL_BASE_URL}`);

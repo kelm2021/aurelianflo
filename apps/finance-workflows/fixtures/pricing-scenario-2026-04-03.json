@@ -1,0 +1,52 @@
+{
+  "as_of_date": "2026-04-03",
+  "workflow": "finance.pricing_plan_compare",
+  "mode": "plan_compare",
+  "inputs": {
+    "baseline": {
+      "label": "baseline",
+      "monthly_visitors": 120000,
+      "conversion_rate": 0.028,
+      "price_usd": 29,
+      "variable_cost_usd": 8.5,
+      "retention_months": 4.5,
+      "fixed_cost_usd": 185000
+    },
+    "candidates": [
+      {
+        "label": "price_up_5pct",
+        "monthly_visitors": 118000,
+        "conversion_rate": 0.027,
+        "price_usd": 31,
+        "variable_cost_usd": 8.5,
+        "retention_months": 4.3,
+        "fixed_cost_usd": 185000
+      },
+      {
+        "label": "conversion_push",
+        "monthly_visitors": 125000,
+        "conversion_rate": 0.031,
+        "price_usd": 28,
+        "variable_cost_usd": 8.7,
+        "retention_months": 4.8,
+        "fixed_cost_usd": 192000
+      },
+      {
+        "label": "lean_ops",
+        "monthly_visitors": 116000,
+        "conversion_rate": 0.029,
+        "price_usd": 27,
+        "variable_cost_usd": 7.9,
+        "retention_months": 4.4,
+        "fixed_cost_usd": 166000
+      }
+    ]
+  },
+  "model_options": {
+    "seed": 20260403,
+    "simulations": 9000,
+    "horizon_months": 24,
+    "include_report": false,
+    "include_artifacts": []
+  }
+}

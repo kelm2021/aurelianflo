@@ -1,0 +1,28 @@
+{
+  "name": "finance-workflows",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Task-shaped finance workflow APIs with x402 payments",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js",
+    "test:canary": "node canary.js",
+    "test:paid-canary": "node paid-canary.cjs",
+    "dev": "node index.js",
+    "start": "node index.js"
+  },
+  "keywords": [
+    "finance",
+    "workflow",
+    "x402",
+    "forecast",
+    "cash-runway",
+    "pricing"
+  ],
+  "author": "Liquid Mercury",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}

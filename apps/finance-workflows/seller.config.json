@@ -1,0 +1,453 @@
+{
+  "packageName": "finance-workflows",
+  "payTo": "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d",
+  "serviceName": "Finance Workflows",
+  "serviceDescription": "Paid x402 APIs for task-shaped finance forecasting workflows and export-ready reports.",
+  "baseUrl": "https://x402.aurelianflo.com",
+  "port": 4050,
+  "network": "eip155:8453",
+  "routes": [
+    {
+      "key": "POST /api/workflows/finance/cash-runway-forecast",
+      "method": "POST",
+      "routePath": "/api/workflows/finance/cash-runway-forecast",
+      "expressPath": "/api/workflows/finance/cash-runway-forecast",
+      "resourcePath": "/api/workflows/finance/cash-runway-forecast",
+      "canonicalPath": "/api/workflows/finance/cash-runway-forecast",
+      "price": "0.18",
+      "category": "workflows/finance",
+      "tags": [
+        "finance",
+        "workflow",
+        "cash",
+        "runway",
+        "forecast"
+      ],
+      "description": "Simulate startup cash runway under burn and revenue uncertainty over a configurable horizon.",
+      "bodyType": "json",
+      "inputExample": {
+        "as_of_date": "2026-04-03",
+        "workflow": "finance.cash_runway_forecast",
+        "mode": "single_case",
+        "inputs": {
+          "company_name": "Northwind Labs",
+          "current_cash_usd": 2400000,
+          "monthly_burn_usd": 280000,
+          "monthly_revenue_usd": 170000,
+          "burn_growth_rate_monthly": 0.015,
+          "revenue_growth_rate_monthly": 0.035,
+          "burn_volatility_pct": 0.1,
+          "revenue_volatility_pct": 0.15,
+          "runway_threshold_usd": 100000
+        },
+        "model_options": {
+          "seed": 20260403,
+          "simulations": 10000,
+          "horizon_months": 24,
+          "include_report": true,
+          "include_artifacts": [
+            "xlsx"
+          ]
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "mode",
+          "inputs"
+        ],
+        "properties": {
+          "as_of_date": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string",
+            "enum": [
+              "finance.cash_runway_forecast"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "single_case"
+            ]
+          },
+          "inputs": {
+            "type": "object",
+            "required": [
+              "current_cash_usd",
+              "monthly_burn_usd"
+            ],
+            "properties": {
+              "company_name": {
+                "type": "string"
+              },
+              "current_cash_usd": {
+                "type": "number"
+              },
+              "monthly_burn_usd": {
+                "type": "number"
+              },
+              "monthly_revenue_usd": {
+                "type": "number"
+              },
+              "burn_growth_rate_monthly": {
+                "type": "number"
+              },
+              "revenue_growth_rate_monthly": {
+                "type": "number"
+              },
+              "burn_volatility_pct": {
+                "type": "number"
+              },
+              "revenue_volatility_pct": {
+                "type": "number"
+              },
+              "runway_threshold_usd": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "model_options": {
+            "type": "object",
+            "properties": {
+              "seed": {
+                "type": "integer"
+              },
+              "simulations": {
+                "type": "integer"
+              },
+              "horizon_months": {
+                "type": "integer"
+              },
+              "include_report": {
+                "type": "boolean"
+              },
+              "include_artifacts": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "xlsx",
+                    "pdf",
+                    "docx"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputExample": {
+        "workflow_meta": {
+          "workflow": "finance.cash_runway_forecast",
+          "mode": "single_case",
+          "as_of_date": "2026-04-03",
+          "model_version": "1.0.0"
+        },
+        "inputs_echo": {
+          "company_name": "Northwind Labs",
+          "simulations": 10000
+        },
+        "summary": {
+          "median_runway_months": 12.2,
+          "p_run_out_within_6_months": 0.07,
+          "p_run_out_within_12_months": 0.44,
+          "ending_cash_p50": 145000,
+          "runway_status": "at_risk",
+          "recommended_action": "stage_cost_controls_and_extend_runway"
+        },
+        "timeline": [],
+        "assumptions": [],
+        "diagnostics": {
+          "simulations_run": 10000,
+          "seed": 20260403
+        },
+        "report": {
+          "report_meta": {
+            "report_type": "finance-cash-runway-forecast",
+            "title": "Cash Runway Forecast"
+          }
+        },
+        "artifacts": {
+          "recommended_local_path": "outputs/cash-runway-forecast-2026-04-03.xlsx",
+          "xlsx": {
+            "documentType": "xlsx"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "workflow_meta",
+          "inputs_echo",
+          "summary",
+          "timeline",
+          "assumptions",
+          "diagnostics"
+        ],
+        "properties": {
+          "workflow_meta": {
+            "type": "object"
+          },
+          "inputs_echo": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "timeline": {
+            "type": "array"
+          },
+          "assumptions": {
+            "type": "array"
+          },
+          "diagnostics": {
+            "type": "object"
+          },
+          "report": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "key": "POST /api/workflows/finance/pricing-plan-compare",
+      "method": "POST",
+      "routePath": "/api/workflows/finance/pricing-plan-compare",
+      "expressPath": "/api/workflows/finance/pricing-plan-compare",
+      "resourcePath": "/api/workflows/finance/pricing-plan-compare",
+      "canonicalPath": "/api/workflows/finance/pricing-plan-compare",
+      "price": "0.2",
+      "category": "workflows/finance",
+      "tags": [
+        "finance",
+        "workflow",
+        "pricing",
+        "plan",
+        "compare"
+      ],
+      "description": "Compare pricing plans against a baseline and rank expected profitability under uncertainty.",
+      "bodyType": "json",
+      "inputExample": {
+        "as_of_date": "2026-04-03",
+        "workflow": "finance.pricing_plan_compare",
+        "mode": "plan_compare",
+        "inputs": {
+          "baseline": {
+            "label": "baseline",
+            "monthly_visitors": 120000,
+            "conversion_rate": 0.028,
+            "price_usd": 29,
+            "variable_cost_usd": 8.5,
+            "retention_months": 4.5,
+            "fixed_cost_usd": 185000
+          },
+          "candidates": [
+            {
+              "label": "price_up_5pct",
+              "monthly_visitors": 118000,
+              "conversion_rate": 0.027,
+              "price_usd": 31,
+              "variable_cost_usd": 8.5,
+              "retention_months": 4.3,
+              "fixed_cost_usd": 185000
+            },
+            {
+              "label": "conversion_push",
+              "monthly_visitors": 125000,
+              "conversion_rate": 0.031,
+              "price_usd": 28,
+              "variable_cost_usd": 8.7,
+              "retention_months": 4.8,
+              "fixed_cost_usd": 192000
+            }
+          ]
+        },
+        "model_options": {
+          "seed": 20260403,
+          "simulations": 12000,
+          "horizon_months": 24,
+          "include_report": true,
+          "include_artifacts": [
+            "xlsx"
+          ]
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "mode",
+          "inputs"
+        ],
+        "properties": {
+          "as_of_date": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string",
+            "enum": [
+              "finance.pricing_plan_compare"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "plan_compare"
+            ]
+          },
+          "inputs": {
+            "type": "object",
+            "required": [
+              "baseline",
+              "candidates"
+            ],
+            "properties": {
+              "baseline": {
+                "type": "object",
+                "required": [
+                  "label",
+                  "monthly_visitors",
+                  "conversion_rate",
+                  "price_usd",
+                  "variable_cost_usd",
+                  "retention_months",
+                  "fixed_cost_usd"
+                ],
+                "additionalProperties": false
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "label",
+                    "monthly_visitors",
+                    "conversion_rate",
+                    "price_usd",
+                    "variable_cost_usd",
+                    "retention_months",
+                    "fixed_cost_usd"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "model_options": {
+            "type": "object",
+            "properties": {
+              "seed": {
+                "type": "integer"
+              },
+              "simulations": {
+                "type": "integer"
+              },
+              "horizon_months": {
+                "type": "integer"
+              },
+              "include_report": {
+                "type": "boolean"
+              },
+              "include_artifacts": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "xlsx",
+                    "pdf",
+                    "docx"
+                  ]
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputExample": {
+        "workflow_meta": {
+          "workflow": "finance.pricing_plan_compare",
+          "mode": "plan_compare",
+          "as_of_date": "2026-04-03",
+          "model_version": "1.0.0"
+        },
+        "inputs_echo": {
+          "scenario_count": 3,
+          "simulations": 12000
+        },
+        "summary": {
+          "best_expected_scenario": "conversion_push",
+          "best_expected_annual_profit_usd": 972000,
+          "best_probability_best": 0.62,
+          "recommendation": "consider_promoting_conversion_push"
+        },
+        "scenarios": [],
+        "assumptions": [],
+        "diagnostics": {
+          "simulations_run": 12000,
+          "seed": 20260403
+        },
+        "report": {
+          "report_meta": {
+            "report_type": "finance-pricing-plan-compare",
+            "title": "Pricing Plan Compare"
+          }
+        },
+        "artifacts": {
+          "recommended_local_path": "outputs/pricing-plan-compare-2026-04-03.xlsx",
+          "xlsx": {
+            "documentType": "xlsx"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "workflow_meta",
+          "inputs_echo",
+          "summary",
+          "scenarios",
+          "assumptions",
+          "diagnostics"
+        ],
+        "properties": {
+          "workflow_meta": {
+            "type": "object"
+          },
+          "inputs_echo": {
+            "type": "object"
+          },
+          "summary": {
+            "type": "object"
+          },
+          "scenarios": {
+            "type": "array"
+          },
+          "assumptions": {
+            "type": "array"
+          },
+          "diagnostics": {
+            "type": "object"
+          },
+          "report": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  ]
+}

@@ -139,41 +139,22 @@ test("api discovery endpoint lists concrete endpoint metadata without payment", 
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api`);
     const body = await response.json();
-    const weatherEntry = body.catalog.find((entry) => entry.routeKey === "GET /api/weather/current/*");
+    const vendorRiskEntry = body.catalog.find((entry) => entry.routeKey === "POST /api/workflows/vendor/risk-assessment");
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("payment-required"), null);
     assert.equal(body.name, "AurelianFlo APIs");
     assert.equal(body.payment.protocol, "x402");
-    assert.equal(body.profile, "compact");
-    assert.equal(body.endpoints, 40);
-    assert.equal(body.totalEndpoints > body.endpoints, true);
-    assert.equal(body.navigation?.mode, "core40");
     assert.ok(Array.isArray(body.catalog));
     assert.ok(body.catalog.length > 0);
-    assert.ok(weatherEntry);
-    assert.equal(weatherEntry.category, "real-time-data/weather");
-    assert.equal(weatherEntry.priceUsd, 0.005);
+    assert.ok(vendorRiskEntry);
+    assert.equal(vendorRiskEntry.category, "workflows/vendor");
+    assert.equal(vendorRiskEntry.priceUsd, 0.18);
     assert.equal(
-      weatherEntry.exampleUrl,
-      "https://x402.aurelianflo.com/api/weather/current/40.7128/-74.0060",
+      vendorRiskEntry.exampleUrl,
+      "https://x402.aurelianflo.com/api/workflows/vendor/risk-assessment",
     );
-    assert.equal(weatherEntry.payment.network, X402_NETWORK);
-  });
-});
-
-test("system discovery alias exposes the same core-first contract", async () => {
-  const app = createApp({ enableDebugRoutes: false });
-
-  await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api/system/discovery`);
-    const body = await response.json();
-
-    assert.equal(response.status, 200);
-    assert.equal(body.profile, "compact");
-    assert.equal(body.endpoints, 40);
-    assert.equal(body.navigation?.mode, "core40");
-    assert.equal(String(body.navigation?.expand?.full || "").includes("?profile=full"), true);
+    assert.equal(vendorRiskEntry.payment.network, X402_NETWORK);
   });
 });
 
@@ -183,6 +164,8 @@ test("openapi document is publicly reachable with title and icon metadata", asyn
   await withServer(app, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/openapi.json`);
     const body = await response.json();
+    const fullResponse = await fetch(`${baseUrl}/openapi-full.json`);
+    const fullBody = await fullResponse.json();
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("payment-required"), null);
@@ -191,7 +174,10 @@ test("openapi document is publicly reachable with title and icon metadata", asyn
     assert.equal(body.info.version, "1.0.0");
     assert.equal(body.info["x-logo"].url, "https://x402.aurelianflo.com/favicon.ico");
     assert.equal(body.servers[0].url, "https://x402.aurelianflo.com");
-    assert.ok(body.paths["/api/stocks/search"]?.get);
+    assert.ok(body.paths["/api/workflows/vendor/risk-assessment"]?.post);
+    assert.ok(!body.paths["/api/stocks/search"]?.get);
+    assert.equal(fullResponse.status, 200);
+    assert.ok(fullBody.paths["/api/stocks/search"]?.get);
   });
 });
 
@@ -222,17 +208,19 @@ test("simulation landing endpoint is free and exposes composability guide", asyn
     assert.equal(body.name, "Bazaar Simulation Suite");
     assert.equal(body.version, "1.0.0");
     assert.equal(Array.isArray(body.endpoints), true);
-    assert.equal(body.endpoints.length, 6);
+    assert.equal(body.endpoints.length, 8);
     assert.deepEqual(endpointPaths, [
       "/api/sim/probability",
+      "/api/sim/batch-probability",
       "/api/sim/compare",
       "/api/sim/sensitivity",
       "/api/sim/forecast",
       "/api/sim/composed",
       "/api/sim/optimize",
+      "/api/sim/report",
     ]);
     assert.equal(body.endpoints[0].price, "$0.05");
-    assert.equal(body.endpoints[5].price, "$0.10");
+    assert.equal(body.endpoints[7].price, "$0.09");
     assert.ok(Array.isArray(body.composability?.pipeline_pattern));
     assert.ok(Array.isArray(body.composability?.example_pipelines));
   });
@@ -254,30 +242,37 @@ test("well-known x402 manifest is publicly reachable", async () => {
     assert.equal(standardPathResponse.status, 200);
     assert.equal(standardPathBody.version, 1);
     assert.ok(Array.isArray(standardPathBody.resources));
-    assert.equal(standardPathBody.resources.length, 40);
-    assert.equal(standardPathBody.discovery?.mode, "core40");
+    assert.ok(
+      standardPathBody.resources.some((entry) => String(entry).startsWith("GET /api/vin/")),
+    );
     assert.equal(dotWellKnownResponse.status, 200);
     assert.equal(dotWellKnownBody.name, "AurelianFlo APIs");
     assert.equal(dotWellKnownBody.website, "https://x402.aurelianflo.com");
     assert.ok(Array.isArray(dotWellKnownBody.resources));
-    assert.equal(dotWellKnownBody.resources.length, 40);
+    assert.ok(dotWellKnownBody.resources.length >= 20);
     assert.match(String(dotWellKnownBody.instructions || ""), /## Composable Simulations/);
     assert.ok(Array.isArray(dotWellKnownBody.endpoints));
-    assert.equal(dotWellKnownBody.endpoints.length, 40);
-    assert.equal(dotWellKnownBody.discovery?.mode, "core40");
-    assert.equal(dotWellKnownBody.fullEndpointCount > dotWellKnownBody.endpointCount, true);
 
     const simulationEndpoints = dotWellKnownBody.endpoints.filter(
       (endpoint) =>
         endpoint.method === "POST" && String(endpoint.path || "").startsWith("/api/sim/"),
     );
-    assert.equal(simulationEndpoints.length, 6);
+    assert.equal(simulationEndpoints.length, 8);
+    assert.ok(simulationEndpoints.some((endpoint) => endpoint.path === "/api/sim/batch-probability"));
+    assert.ok(simulationEndpoints.some((endpoint) => endpoint.path === "/api/sim/report"));
+
+    const probabilityEndpoint = simulationEndpoints.find((endpoint) => endpoint.path === "/api/sim/probability");
+    const reportEndpoint = simulationEndpoints.find((endpoint) => endpoint.path === "/api/sim/report");
+
+    assert.equal(probabilityEndpoint?.composability?.pattern, "data-to-simulation");
+    assert.equal(reportEndpoint?.composability?.pattern, "simulation-to-report");
     for (const endpoint of simulationEndpoints) {
-      assert.equal(endpoint.composability?.pattern, "data-to-simulation", endpoint.path);
       assert.ok(typeof endpoint.composability?.description === "string", endpoint.path);
     }
 
-    assert.ok(dotWellKnownBody.resources.includes(`${genericSimulatorBaseUrl}/api/sim/probability`));
+    for (const resourceUrl of genericSimulatorResources) {
+      assert.ok(dotWellKnownBody.resources.includes(resourceUrl), resourceUrl);
+    }
 
     assert.ok(!dotWellKnownBody.resources.includes(`${genericSimulatorBaseUrl}/methodology`));
     assert.ok(!dotWellKnownBody.resources.includes(`${genericSimulatorBaseUrl}/integrations/payments-mcp`));
@@ -379,12 +374,11 @@ test("api discovery includes representative all-tier expansion endpoints", async
   });
 
   await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}/api?profile=full`);
+    const response = await fetch(`${baseUrl}/api/system/discovery/full?limit=500`);
     const body = await response.json();
     const routeKeys = new Set(body.catalog.map((entry) => entry.routeKey));
 
     assert.equal(response.status, 200);
-    assert.equal(body.profile, "full");
     assert.ok(routeKeys.has("GET /api/stocks/quote/*"));
     assert.ok(routeKeys.has("GET /api/stocks/search"));
     assert.ok(routeKeys.has("GET /api/treasury-rates"));

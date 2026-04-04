@@ -81,12 +81,23 @@ function parseSimCount(req, options = {}) {
   });
 }
 
+function parseSeed(req, options = {}) {
+  const candidate = req.query?.seed ?? req.body?.seed;
+
+  return parseIntegerInput(candidate, {
+    field: "seed",
+    min: 0,
+    max: Number.MAX_SAFE_INTEGER,
+    defaultValue: options.defaultSeed,
+  });
+}
+
 function parseScenarioBody(req) {
   if (!isPlainObject(req.body)) {
     return {};
   }
 
-  const { sims: _ignoredSims, ...scenario } = req.body;
+  const { sims: _ignoredSims, seed: _ignoredSeed, ...scenario } = req.body;
   return scenario;
 }
 
@@ -96,8 +107,14 @@ function parseSimParams(req, options = {}) {
     return { error: simCountResult.error };
   }
 
+  const seedResult = parseSeed(req, options);
+  if (seedResult.error) {
+    return { error: seedResult.error };
+  }
+
   return {
     numSims: simCountResult.value,
+    seed: seedResult.value,
     scenario: parseScenarioBody(req),
   };
 }
@@ -108,5 +125,6 @@ module.exports = {
   MAX_SIMS,
   parseIntegerInput,
   parseSimCount,
+  parseSeed,
   parseSimParams,
 };

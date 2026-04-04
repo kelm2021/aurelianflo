@@ -1,4 +1,5 @@
 const {
+  runBatchProbability,
   runSimulation,
   runCompare,
   runSensitivity,
@@ -6,27 +7,34 @@ const {
   runComposed,
   runOptimize,
 } = require("../sim/engine");
-const { parseSimCount, parseSimParams } = require("../lib/sim-params");
+const { runSimulationReport } = require("../lib/report");
+const { parseSeed, parseSimCount, parseSimParams } = require("../lib/sim-params");
 
 const PATH_HANDLERS = {
   "/api/sim/probability": {
     parse: parseSimParams,
-    execute: ({ numSims, scenario }) => runSimulation(numSims, scenario),
+    execute: ({ numSims, seed, scenario }) => runSimulation(numSims, scenario, { seed }),
+  },
+  "/api/sim/batch-probability": {
+    execute: ({ numSims, seed, body }) => runBatchProbability(numSims, body, { seed }),
   },
   "/api/sim/compare": {
-    execute: ({ numSims, body }) => runCompare(numSims, body),
+    execute: ({ numSims, seed, body }) => runCompare(numSims, body, { seed }),
   },
   "/api/sim/sensitivity": {
-    execute: ({ numSims, body }) => runSensitivity(numSims, body),
+    execute: ({ numSims, seed, body }) => runSensitivity(numSims, body, { seed }),
   },
   "/api/sim/forecast": {
-    execute: ({ numSims, body }) => runForecast(numSims, body),
+    execute: ({ numSims, seed, body }) => runForecast(numSims, body, { seed }),
   },
   "/api/sim/composed": {
-    execute: ({ numSims, body }) => runComposed(numSims, body),
+    execute: ({ numSims, seed, body }) => runComposed(numSims, body, { seed }),
   },
   "/api/sim/optimize": {
-    execute: ({ numSims, body }) => runOptimize(numSims, body),
+    execute: ({ numSims, seed, body }) => runOptimize(numSims, body, { seed }),
+  },
+  "/api/sim/report": {
+    execute: ({ numSims, seed, body }) => runSimulationReport(numSims, body, { seed }),
   },
 };
 
@@ -51,7 +59,7 @@ function getBodyWithoutSims(req) {
     return {};
   }
 
-  const { sims: _ignoredSims, ...rest } = req.body;
+  const { sims: _ignoredSims, seed: _ignoredSeed, ...rest } = req.body;
   return rest;
 }
 
@@ -127,8 +135,14 @@ async function primaryHandler(req, res) {
     return res.status(400).json(simCountResult.error);
   }
 
+  const seedResult = parseSeed(req);
+  if (seedResult.error) {
+    return res.status(400).json(seedResult.error);
+  }
+
   const result = route.execute({
     numSims: simCountResult.value,
+    seed: seedResult.value,
     body: getBodyWithoutSims(req),
   });
 

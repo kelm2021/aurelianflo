@@ -40,6 +40,7 @@
           "execution_quality": 0.1,
           "pricing_pressure": 0.2
         },
+        "outcome_noise": 0.9,
         "bias": 0,
         "threshold": 0.25
       },
@@ -69,6 +70,10 @@
               "minimum": 0
             }
           },
+          "outcome_noise": {
+            "type": "number",
+            "minimum": 0
+          },
           "bias": {
             "type": "number"
           },
@@ -81,22 +86,50 @@
       "outputExample": {
         "simulation_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
-          "success_rule": "score >= threshold"
+          "model_version": "3.1.0",
+          "success_rule": "score + outcome_noise_draw >= threshold",
+          "calibration": {
+            "outcome_noise": 0.9,
+            "outcome_noise_source": "default"
+          }
         },
-        "outcome_probability": 0.6743,
+        "outcome_probability": 0.8124,
         "confidence_interval_95": {
-          "low": 0.665,
-          "high": 0.6835
+          "low": 0.8048,
+          "high": 0.82
         },
         "score_distribution": {
-          "mean": 0.3921,
-          "stddev": 0.245,
-          "min": -0.4821,
-          "p10": 0.0783,
-          "p50": 0.3915,
-          "p90": 0.704,
-          "max": 1.2364
+          "mean": 0.9981,
+          "stddev": 0.1742,
+          "min": 0.3475,
+          "p05": 0.7123,
+          "p10": 0.7754,
+          "p25": 0.8802,
+          "p50": 0.998,
+          "p75": 1.1128,
+          "p90": 1.2226,
+          "p95": 1.2817,
+          "max": 1.6187
+        },
+        "effective_score_distribution": {
+          "mean": 1.0003,
+          "stddev": 0.9185,
+          "min": -2.1219,
+          "p05": -0.5012,
+          "p10": -0.1791,
+          "p25": 0.3872,
+          "p50": 0.9983,
+          "p75": 1.6124,
+          "p90": 2.1839,
+          "p95": 2.5027,
+          "max": 4.0218
+        },
+        "risk_metrics": {
+          "probability_above_threshold": 0.8124,
+          "probability_below_threshold": 0.1876,
+          "expected_shortfall_05": -0.8743,
+          "expected_upside_95": 2.9732,
+          "threshold_gap_p50": 0.7483
         },
         "parameter_contributions": {
           "demand_signal": {
@@ -114,6 +147,12 @@
             "weight": 0.9,
             "mean_contribution": -0.315
           }
+        },
+        "diagnostics": {
+          "threshold": 0.25,
+          "effective_score_stddev": 0.9185,
+          "effective_margin_mean": 0.7503,
+          "saturation_risk": "moderate"
         }
       },
       "outputSchema": {
@@ -123,6 +162,8 @@
           "outcome_probability",
           "confidence_interval_95",
           "score_distribution",
+          "effective_score_distribution",
+          "risk_metrics",
           "parameter_contributions"
         ],
         "properties": {
@@ -157,8 +198,206 @@
           "score_distribution": {
             "type": "object"
           },
+          "effective_score_distribution": {
+            "type": "object"
+          },
+          "risk_metrics": {
+            "type": "object"
+          },
           "parameter_contributions": {
             "type": "object"
+          },
+          "diagnostics": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "key": "POST /api/sim/batch-probability",
+      "method": "POST",
+      "routePath": "/api/sim/batch-probability",
+      "expressPath": "/api/sim/batch-probability",
+      "resourcePath": "/api/sim/batch-probability",
+      "canonicalPath": "/api/sim/batch-probability",
+      "price": "0.08",
+      "category": "modeling/batch",
+      "tags": [
+        "simulation",
+        "monte-carlo",
+        "batch",
+        "ranking",
+        "decision-modeling"
+      ],
+      "description": "Run probability simulation across many scenarios in one call and return ranked results.",
+      "bodyType": "json",
+      "inputExample": {
+        "scenarios": [
+          {
+            "label": "baseline",
+            "parameters": {
+              "demand_signal": 0.65,
+              "execution_quality": 0.6,
+              "pricing_pressure": -0.25
+            },
+            "threshold": 0.25
+          },
+          {
+            "label": "candidate",
+            "parameters": {
+              "demand_signal": 0.78,
+              "execution_quality": 0.68,
+              "pricing_pressure": -0.2
+            },
+            "threshold": 0.25
+          }
+        ]
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "scenarios"
+        ],
+        "$defs": {
+          "scenario": {
+            "type": "object",
+            "required": [
+              "parameters"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "parameters": {
+                "type": "object",
+                "minProperties": 1,
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "weights": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "uncertainty": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
+              "bias": {
+                "type": "number"
+              },
+              "threshold": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "properties": {
+          "scenarios": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/$defs/scenario"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputExample": {
+        "batch_meta": {
+          "simulations_run": 10000,
+          "model_version": "3.1.0",
+          "scenario_count": 2,
+          "ranked_by": [
+            "outcome_probability",
+            "mean_score"
+          ]
+        },
+        "scenarios": [
+          {
+            "index": 0,
+            "label": "baseline",
+            "result": {
+              "outcome_probability": 0.7983,
+              "score_distribution": {
+                "mean": 1.0012
+              },
+              "effective_score_distribution": {
+                "p95": 2.4178
+              },
+              "risk_metrics": {
+                "expected_shortfall_05": -0.9321
+              },
+              "diagnostics": {
+                "saturation_risk": "moderate"
+              }
+            }
+          },
+          {
+            "index": 1,
+            "label": "candidate",
+            "result": {
+              "outcome_probability": 0.8628,
+              "score_distribution": {
+                "mean": 1.2604
+              },
+              "effective_score_distribution": {
+                "p95": 2.6149
+              },
+              "risk_metrics": {
+                "expected_shortfall_05": -0.6812
+              },
+              "diagnostics": {
+                "saturation_risk": "moderate"
+              }
+            }
+          }
+        ],
+        "ranking": [
+          {
+            "rank": 1,
+            "index": 1,
+            "label": "candidate",
+            "outcome_probability": 0.8628,
+            "mean_score": 1.2604
+          },
+          {
+            "rank": 2,
+            "index": 0,
+            "label": "baseline",
+            "outcome_probability": 0.7983,
+            "mean_score": 1.0012
+          }
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "batch_meta",
+          "scenarios",
+          "ranking"
+        ],
+        "properties": {
+          "batch_meta": {
+            "type": "object"
+          },
+          "scenarios": {
+            "type": "array"
+          },
+          "ranking": {
+            "type": "array"
           }
         },
         "additionalProperties": true
@@ -178,7 +417,7 @@
         "scenario-compare",
         "decision-modeling"
       ],
-      "description": "Compare baseline and candidate scenarios and return uplift deltas with confidence diagnostics.",
+      "description": "Compare baseline and candidate scenarios with paired score distributions, uplift deltas, and decision-oriented guidance.",
       "bodyType": "json",
       "inputExample": {
         "baseline": {
@@ -187,6 +426,7 @@
             "execution_quality": 0.6,
             "pricing_pressure": -0.25
           },
+          "outcome_noise": 0.9,
           "threshold": 0.25
         },
         "candidate": {
@@ -195,6 +435,7 @@
             "execution_quality": 0.68,
             "pricing_pressure": -0.2
           },
+          "outcome_noise": 0.9,
           "threshold": 0.25
         }
       },
@@ -231,6 +472,10 @@
                   "minimum": 0
                 }
               },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
               "bias": {
                 "type": "number"
               },
@@ -266,36 +511,96 @@
       "outputExample": {
         "comparison_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
+          "model_version": "3.1.0",
           "baseline_label": "baseline",
           "candidate_label": "candidate"
         },
         "baseline": {
-          "outcome_probability": 0.6112,
+          "simulation_meta": {
+            "simulations_run": 10000,
+            "model_version": "3.1.0",
+            "success_rule": "score + outcome_noise_draw >= threshold",
+            "calibration": {
+              "outcome_noise": 0.9,
+              "outcome_noise_source": "default"
+            }
+          },
+          "outcome_probability": 0.8019,
           "confidence_interval_95": {
-            "low": 0.6018,
-            "high": 0.6204
+            "low": 0.7941,
+            "high": 0.8097
           },
           "score_distribution": {
-            "mean": 0.31,
-            "stddev": 0.24
+            "mean": 1.0004,
+            "stddev": 0.1721
+          },
+          "effective_score_distribution": {
+            "p95": 2.4178
+          },
+          "risk_metrics": {
+            "expected_shortfall_05": -0.9321
+          },
+          "diagnostics": {
+            "threshold": 0.25,
+            "effective_score_stddev": 0.9041,
+            "effective_margin_mean": 0.7629,
+            "saturation_risk": "moderate"
           }
         },
         "candidate": {
-          "outcome_probability": 0.6948,
+          "simulation_meta": {
+            "simulations_run": 10000,
+            "model_version": "3.1.0",
+            "success_rule": "score + outcome_noise_draw >= threshold",
+            "calibration": {
+              "outcome_noise": 0.9,
+              "outcome_noise_source": "default"
+            }
+          },
+          "outcome_probability": 0.861,
           "confidence_interval_95": {
-            "low": 0.6857,
-            "high": 0.7037
+            "low": 0.8542,
+            "high": 0.8678
           },
           "score_distribution": {
-            "mean": 0.39,
-            "stddev": 0.24
+            "mean": 1.2596,
+            "stddev": 0.1709
+          },
+          "effective_score_distribution": {
+            "p95": 2.6149
+          },
+          "risk_metrics": {
+            "expected_shortfall_05": -0.6812
+          },
+          "diagnostics": {
+            "threshold": 0.25,
+            "effective_score_stddev": 0.9132,
+            "effective_margin_mean": 0.9961,
+            "saturation_risk": "moderate"
           }
         },
         "deltas": {
-          "outcome_probability": 0.0836,
-          "mean_score": 0.08,
-          "relative_probability_change": 0.1368
+          "outcome_probability": 0.0591,
+          "mean_score": 0.2592,
+          "relative_probability_change": 0.0737
+        },
+        "paired_score_distribution": {
+          "mean": 0.2592,
+          "stddev": 1.2863,
+          "min": -5.8814,
+          "p05": -1.8821,
+          "p10": -1.3794,
+          "p25": -0.6228,
+          "p50": 0.2588,
+          "p75": 1.1341,
+          "p90": 1.9057,
+          "p95": 2.4049,
+          "max": 4.9437
+        },
+        "decision_summary": {
+          "preferred_scenario": "candidate",
+          "probability_candidate_outperforms": 0.5761,
+          "expected_score_gap": 0.2592
         }
       },
       "outputSchema": {
@@ -304,7 +609,9 @@
           "comparison_meta",
           "baseline",
           "candidate",
-          "deltas"
+          "deltas",
+          "paired_score_distribution",
+          "decision_summary"
         ],
         "properties": {
           "comparison_meta": {
@@ -318,6 +625,61 @@
           },
           "deltas": {
             "type": "object"
+          },
+          "paired_score_distribution": {
+            "type": "object",
+            "required": [
+              "mean",
+              "stddev",
+              "p10",
+              "p50",
+              "p90"
+            ],
+            "properties": {
+              "mean": {
+                "type": "number"
+              },
+              "stddev": {
+                "type": "number"
+              },
+              "p10": {
+                "type": "number"
+              },
+              "p50": {
+                "type": "number"
+              },
+              "p90": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "decision_summary": {
+            "type": "object",
+            "required": [
+              "preferred_scenario",
+              "probability_candidate_outperforms",
+              "expected_score_gap"
+            ],
+            "properties": {
+              "preferred_scenario": {
+                "type": "string",
+                "enum": [
+                  "baseline",
+                  "candidate",
+                  "tie"
+                ]
+              },
+              "probability_candidate_outperforms": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "expected_score_gap": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": true
@@ -337,7 +699,7 @@
         "sensitivity",
         "feature-impact"
       ],
-      "description": "Measure probability sensitivity for a selected parameter using plus/minus perturbation runs.",
+      "description": "Measure probability sensitivity for a selected parameter using plus/minus perturbation runs with response-curve diagnostics.",
       "bodyType": "json",
       "inputExample": {
         "scenario": {
@@ -385,6 +747,10 @@
                   "minimum": 0
                 }
               },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
               "bias": {
                 "type": "number"
               },
@@ -420,35 +786,61 @@
       "outputExample": {
         "sensitivity_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
+          "model_version": "3.1.0",
           "parameter": "demand_signal",
           "mode": "relative",
           "delta": 0.1,
           "base_parameter_value": 0.72
         },
         "baseline": {
-          "outcome_probability": 0.6743,
+          "outcome_probability": 0.8248,
           "confidence_interval_95": {
-            "low": 0.665,
-            "high": 0.6835
+            "low": 0.8173,
+            "high": 0.8321
+          },
+          "effective_score_distribution": {
+            "p95": 2.5632
+          },
+          "risk_metrics": {
+            "expected_shortfall_05": -0.7219
           }
         },
         "low_variant": {
           "parameter_value": 0.648,
           "result": {
-            "outcome_probability": 0.6311
+            "outcome_probability": 0.8072,
+            "effective_score_distribution": {
+              "p95": 2.4831
+            },
+            "risk_metrics": {
+              "expected_shortfall_05": -0.8015
+            }
           }
         },
         "high_variant": {
           "parameter_value": 0.792,
           "result": {
-            "outcome_probability": 0.7184
+            "outcome_probability": 0.8428,
+            "effective_score_distribution": {
+              "p95": 2.6394
+            },
+            "risk_metrics": {
+              "expected_shortfall_05": -0.6428
+            }
           }
         },
         "sensitivity": {
-          "probability_gradient": 0.6063,
-          "shift_low": -0.0432,
-          "shift_high": 0.0441
+          "probability_gradient": 0.2472,
+          "shift_low": -0.0176,
+          "shift_high": 0.018,
+          "midpoint_elasticity": 0.2165,
+          "direction": "increasing"
+        },
+        "response_curve": {
+          "low_probability": 0.8072,
+          "baseline_probability": 0.8248,
+          "high_probability": 0.8428,
+          "span": 0.0356
         }
       },
       "outputSchema": {
@@ -458,7 +850,8 @@
           "baseline",
           "low_variant",
           "high_variant",
-          "sensitivity"
+          "sensitivity",
+          "response_curve"
         ],
         "properties": {
           "sensitivity_meta": {
@@ -474,7 +867,73 @@
             "type": "object"
           },
           "sensitivity": {
-            "type": "object"
+            "type": "object",
+            "required": [
+              "probability_gradient",
+              "shift_low",
+              "shift_high",
+              "midpoint_elasticity",
+              "direction"
+            ],
+            "properties": {
+              "probability_gradient": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "shift_low": {
+                "type": "number"
+              },
+              "shift_high": {
+                "type": "number"
+              },
+              "midpoint_elasticity": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "increasing",
+                  "decreasing",
+                  "flat"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "response_curve": {
+            "type": "object",
+            "required": [
+              "low_probability",
+              "baseline_probability",
+              "high_probability",
+              "span"
+            ],
+            "properties": {
+              "low_probability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "baseline_probability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "high_probability": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "span": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": true
@@ -546,6 +1005,10 @@
                   "minimum": 0
                 }
               },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
               "bias": {
                 "type": "number"
               },
@@ -588,7 +1051,7 @@
       "outputExample": {
         "forecast_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
+          "model_version": "3.1.0",
           "periods": 6,
           "growth_mode": "additive",
           "uncertainty_growth": 0.02
@@ -606,7 +1069,13 @@
               "low": 0.6749,
               "high": 0.6931
             },
-            "mean_score": 0.41
+            "mean_score": 0.41,
+            "effective_score_distribution": {
+              "p95": 2.1014
+            },
+            "risk_metrics": {
+              "expected_shortfall_05": -1.0047
+            }
           }
         ],
         "summary": {
@@ -635,7 +1104,9 @@
                 "parameters",
                 "outcome_probability",
                 "confidence_interval_95",
-                "mean_score"
+                "mean_score",
+                "effective_score_distribution",
+                "risk_metrics"
               ],
               "properties": {
                 "period": {
@@ -655,6 +1126,12 @@
                 },
                 "mean_score": {
                   "type": "number"
+                },
+                "effective_score_distribution": {
+                  "type": "object"
+                },
+                "risk_metrics": {
+                  "type": "object"
                 }
               },
               "additionalProperties": true
@@ -743,6 +1220,10 @@
                   "minimum": 0
                 }
               },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
               "bias": {
                 "type": "number"
               },
@@ -792,6 +1273,10 @@
                     "minimum": 0
                   }
                 },
+                "outcome_noise": {
+                  "type": "number",
+                  "minimum": 0
+                },
                 "bias": {
                   "type": "number"
                 },
@@ -823,7 +1308,7 @@
       "outputExample": {
         "composed_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
+          "model_version": "3.1.0",
           "components": 2
         },
         "components": [
@@ -972,6 +1457,10 @@
                   "minimum": 0
                 }
               },
+              "outcome_noise": {
+                "type": "number",
+                "minimum": 0
+              },
               "bias": {
                 "type": "number"
               },
@@ -1027,7 +1516,7 @@
       "outputExample": {
         "optimization_meta": {
           "simulations_run": 10000,
-          "model_version": "3.0.0",
+          "model_version": "3.1.0",
           "objective": "outcome_probability",
           "iterations_evaluated": 101
         },
@@ -1091,6 +1580,214 @@
             "type": "number"
           },
           "bounds": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    {
+      "key": "POST /api/sim/report",
+      "method": "POST",
+      "routePath": "/api/sim/report",
+      "expressPath": "/api/sim/report",
+      "resourcePath": "/api/sim/report",
+      "canonicalPath": "/api/sim/report",
+      "price": "0.09",
+      "category": "modeling/reporting",
+      "tags": [
+        "simulation",
+        "reporting",
+        "decision-support",
+        "export"
+      ],
+      "description": "Generate a structured decision report from any supported simulation workflow, including executive summary, analyst tables, and workbook-ready rows.",
+      "bodyType": "json",
+      "inputExample": {
+        "analysis_type": "compare",
+        "title": "Candidate vs baseline decision memo",
+        "summary_focus": "decision",
+        "request": {
+          "baseline": {
+            "parameters": {
+              "demand_signal": 0.65,
+              "execution_quality": 0.6,
+              "pricing_pressure": -0.25
+            },
+            "threshold": 0.25
+          },
+          "candidate": {
+            "parameters": {
+              "demand_signal": 0.78,
+              "execution_quality": 0.68,
+              "pricing_pressure": -0.2
+            },
+            "threshold": 0.25
+          }
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "analysis_type",
+          "request"
+        ],
+        "properties": {
+          "analysis_type": {
+            "type": "string",
+            "enum": [
+              "probability",
+              "batch-probability",
+              "compare",
+              "sensitivity",
+              "forecast",
+              "composed",
+              "optimize"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary_focus": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputExample": {
+        "report_meta": {
+          "analysis_type": "compare",
+          "title": "Candidate vs baseline decision memo",
+          "summary_focus": "decision",
+          "simulations_run": 10000,
+          "model_version": "3.1.0",
+          "seed": 24680
+        },
+        "executive_summary": [
+          "candidate outperforms baseline in 0.5769 of paired draws.",
+          "Expected effective score gap is 0.1423.",
+          "Probability uplift from baseline to candidate is 0.0615."
+        ],
+        "headline_metrics": [
+          {
+            "label": "Preferred scenario",
+            "value": "candidate",
+            "unit": "label"
+          },
+          {
+            "label": "Candidate outperformance",
+            "value": 0.5769,
+            "unit": "probability"
+          },
+          {
+            "label": "Expected score gap",
+            "value": 0.1423,
+            "unit": "score"
+          }
+        ],
+        "tables": {
+          "scenario_summary": {
+            "columns": [
+              "scenario",
+              "outcome_probability",
+              "mean_score",
+              "effective_p50",
+              "expected_shortfall_05",
+              "saturation_risk"
+            ],
+            "rows": [
+              {
+                "scenario": "baseline",
+                "outcome_probability": 0.8003,
+                "mean_score": 1.0012,
+                "effective_p50": 0.994,
+                "expected_shortfall_05": -0.9321,
+                "saturation_risk": "moderate"
+              },
+              {
+                "scenario": "candidate",
+                "outcome_probability": 0.8665,
+                "mean_score": 1.2145,
+                "effective_p50": 1.2011,
+                "expected_shortfall_05": -0.6812,
+                "saturation_risk": "moderate"
+              }
+            ]
+          },
+          "assumptions": {
+            "columns": [
+              "field",
+              "value"
+            ],
+            "rows": [
+              {
+                "field": "analysis_type",
+                "value": "compare"
+              },
+              {
+                "field": "simulations_run",
+                "value": 10000
+              }
+            ]
+          }
+        },
+        "export_artifacts": {
+          "workbook_rows": {
+            "scenario_summary": [
+              {
+                "scenario": "baseline",
+                "outcome_probability": 0.8003
+              },
+              {
+                "scenario": "candidate",
+                "outcome_probability": 0.8665
+              }
+            ],
+            "assumptions": [
+              {
+                "field": "analysis_type",
+                "value": "compare"
+              }
+            ]
+          }
+        },
+        "result": {
+          "comparison_meta": {
+            "simulations_run": 10000,
+            "model_version": "3.1.0"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "required": [
+          "report_meta",
+          "executive_summary",
+          "headline_metrics",
+          "tables",
+          "export_artifacts",
+          "result"
+        ],
+        "properties": {
+          "report_meta": {
+            "type": "object"
+          },
+          "executive_summary": {
+            "type": "array"
+          },
+          "headline_metrics": {
+            "type": "array"
+          },
+          "tables": {
+            "type": "object"
+          },
+          "export_artifacts": {
+            "type": "object"
+          },
+          "result": {
             "type": "object"
           }
         },

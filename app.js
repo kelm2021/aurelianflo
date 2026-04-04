@@ -12,6 +12,14 @@ const vendorEntityBriefSellerConfig = require("./apps/vendor-entity-brief/seller
 const vendorEntityBriefPrimaryHandler = require("./apps/vendor-entity-brief/handlers/primary");
 const genericSimulatorSellerConfig = require("./apps/generic-parameter-simulator/seller.config.json");
 const genericSimulatorPrimaryHandler = require("./apps/generic-parameter-simulator/handlers/primary");
+const sportsWorkflowSellerConfig = require("./apps/sports-workflows/seller.config.json");
+const sportsWorkflowPrimaryHandler = require("./apps/sports-workflows/handlers/primary");
+const vendorWorkflowSellerConfig = require("./apps/vendor-workflows/seller.config.json");
+const vendorWorkflowPrimaryHandler = require("./apps/vendor-workflows/handlers/primary");
+const financeWorkflowSellerConfig = require("./apps/finance-workflows/seller.config.json");
+const financeWorkflowPrimaryHandler = require("./apps/finance-workflows/handlers/primary");
+const generatedCatalog = require("./routes/generated-catalog.json");
+const generatedRoutesRouter = require("./routes/generated");
 const {
   createMetricsAttribution,
   createMetricsDashboardHandler,
@@ -78,29 +86,36 @@ const PRODUCTION_HIDDEN_ROUTE_KEYS = new Set([
 ]);
 const SIM_ROUTE_ORDER = [
   "/api/sim/probability",
+  "/api/sim/batch-probability",
   "/api/sim/compare",
   "/api/sim/sensitivity",
   "/api/sim/forecast",
   "/api/sim/composed",
   "/api/sim/optimize",
+  "/api/sim/report",
 ];
 const SIM_ENDPOINT_SUMMARIES = {
   "/api/sim/probability":
-    "Single outcome probability with confidence interval and score distribution",
-  "/api/sim/compare": "Compare baseline vs candidate scenario side-by-side",
+    "Calibrated single-scenario probability with confidence interval, raw/effective score distributions, risk metrics, and diagnostics",
+  "/api/sim/batch-probability":
+    "Run many scenarios in one call and return calibrated ranked probabilities with per-scenario distributions, risk metrics, and diagnostics",
+  "/api/sim/compare":
+    "Compare baseline vs candidate scenarios with calibrated deltas, paired score-gap distribution, and decision summary",
   "/api/sim/sensitivity":
-    "Sweep one parameter to measure its impact on outcome probability",
+    "Sweep one parameter to measure local impact on calibrated probability with elasticity and response-curve diagnostics",
   "/api/sim/forecast":
-    "Forward projection with drift, uncertainty growth, and period-by-period timeline",
+    "Forward projection with drift, uncertainty growth, and period-by-period calibrated timeline including effective distributions and risk metrics",
   "/api/sim/composed":
     "Blend multiple weighted scenario components into a single outcome",
   "/api/sim/optimize": "Search bounded parameter ranges to maximize objective value",
+  "/api/sim/report":
+    "Wrap any simulation result in a structured decision report with executive summary, headline metrics, workbook-ready tables, and the raw result payload",
 };
 const SIM_ENDPOINT_COMPOSABILITY = {
   "/api/sim/probability": {
     pattern: "data-to-simulation",
     description:
-      "Parameters can be sourced from any Bazaar data endpoint. Fetch real-world data, extract numeric values, and pass them as named parameters.",
+      "Parameters can be sourced from any Bazaar data endpoint. Fetch real-world data, extract numeric values, and pass them as named parameters. The simulator applies a calibrated outcome-noise layer and returns both raw/effective score distributions plus threshold-aware risk metrics.",
     example_sources: [
       {
         endpoint: "/api/bls/unemployment",
@@ -119,12 +134,31 @@ const SIM_ENDPOINT_COMPOSABILITY = {
       },
     ],
     normalization_tip:
-      "Scale raw values to roughly -1 to 1. Example: unemployment 4.4% -> (5.0 - 4.4) / 3.0 = 0.2 (positive labor signal)",
+      "Scale raw values to roughly -1 to 1. Example: unemployment 4.4% -> (5.0 - 4.4) / 3.0 = 0.2 (positive labor signal). Override outcome_noise only when you need deterministic behavior or strict custom calibration.",
+  },
+  "/api/sim/batch-probability": {
+    pattern: "portfolio-or-screening",
+    description:
+      "Bundle many labeled scenarios into one paid call to score, calibrate, rank, and shortlist options before deeper analysis. Each scenario result includes calibrated distributions and risk metrics for side-by-side risk ranking.",
+    example_sources: [
+      {
+        endpoint: "/api/stocks/screener",
+        extract: "data.results[*]",
+        use_as: "candidate scenarios with normalized factor inputs",
+      },
+      {
+        endpoint: "/api/bls/unemployment",
+        extract: "data.latest.rate_pct",
+        use_as: "shared macro input applied across scenarios",
+      },
+    ],
+    normalization_tip:
+      "Pre-normalize scenario factors onto a consistent scale and keep threshold plus outcome_noise consistent across scenarios when you want rankings to be directly comparable.",
   },
   "/api/sim/compare": {
     pattern: "data-to-simulation",
     description:
-      "Build baseline and candidate scenarios from real endpoint data. Example: baseline uses current economic indicators, candidate uses projected values.",
+      "Build baseline and candidate scenarios from real endpoint data. Example: baseline uses current economic indicators, candidate uses projected values. Keep calibration settings aligned to make deltas meaningful, and use paired score-gap plus decision summary fields to judge practical lift.",
     example_sources: [
       {
         endpoint: "/api/treasury-rates",
@@ -141,7 +175,7 @@ const SIM_ENDPOINT_COMPOSABILITY = {
   "/api/sim/sensitivity": {
     pattern: "data-to-simulation",
     description:
-      "Use live data as the scenario baseline, then sweep one parameter to find which real-world factor has the most impact.",
+      "Use live data as the scenario baseline, then sweep one parameter to find which real-world factor has the most impact under calibrated probability assumptions. Use direction, midpoint elasticity, and response-curve span to quantify local effect size.",
     example_sources: [
       {
         endpoint: "/api/bls/cpi",
@@ -158,7 +192,7 @@ const SIM_ENDPOINT_COMPOSABILITY = {
   "/api/sim/forecast": {
     pattern: "data-to-simulation",
     description:
-      "Initialize forecast with current real-world values and project forward. Drift parameters can reflect trends from historical data endpoints.",
+      "Initialize forecast with current real-world values and project forward. Drift parameters can reflect trends from historical data endpoints, while each timeline point includes effective score distribution and threshold risk metrics.",
     example_sources: [
       {
         endpoint: "/api/weather/historical",
@@ -222,6 +256,25 @@ const SIM_ENDPOINT_COMPOSABILITY = {
     normalization_tip:
       "Bounds should reflect plausible real-world ranges, not just -1 to 1.",
   },
+  "/api/sim/report": {
+    pattern: "simulation-to-report",
+    description:
+      "Run any supported simulation workflow and immediately transform the result into a reusable analyst payload. The report response includes an executive summary, headline metrics, workbook-ready tables, and the underlying raw result for downstream export or audit.",
+    example_sources: [
+      {
+        endpoint: "/api/sim/compare",
+        extract: "baseline, candidate, deltas, and decision_summary",
+        use_as: "decision memo source",
+      },
+      {
+        endpoint: "/api/sim/forecast",
+        extract: "timeline and summary",
+        use_as: "trend tab or planning brief source",
+      },
+    ],
+    normalization_tip:
+      "Keep the underlying simulation payload under `request` and set `analysis_type` to the source endpoint you want summarized.",
+  },
 };
 const SIM_COMPOSABILITY_INSTRUCTIONS_BLOCK = `## Composable Simulations
 
@@ -234,7 +287,7 @@ Example pipeline:
 4. Normalize each value to a -1 to 1 signal
 5. POST /api/sim/composed -> blend scenarios with live economic parameters
 
-This composability pattern works across all simulation endpoints: probability, compare, sensitivity, forecast, composed, and optimize. The data endpoints provide the inputs; the simulation endpoints provide the analysis.`;
+This composability pattern works across all simulation endpoints: probability, batch-probability, compare, sensitivity, forecast, composed, and optimize. The data endpoints provide the inputs; the simulation endpoints provide calibrated probability analysis with distributions, risk metrics, and diagnostics.`;
 const SIM_LANDING_COMPOSABILITY = {
   overview:
     "The simulation suite is designed to consume real-world data from other Bazaar endpoints. Any numeric value from any GET endpoint can become a simulation parameter.",
@@ -243,7 +296,7 @@ const SIM_LANDING_COMPOSABILITY = {
     "2. Extract numeric values from responses",
     "3. Normalize values to a working range (typically -1 to 1)",
     "4. Pass as named parameters to any POST /api/sim/* endpoint",
-    "5. Receive probability, distribution, and decision-ready output",
+    "5. Receive calibrated probability plus distributions, risk metrics, ranking/diagnostics, and decision-ready output",
   ],
   example_pipelines: [
     {
@@ -540,6 +593,7 @@ function createDiscoveryExtension(options = {}) {
     inputSchema,
     bodyType,
     outputExample,
+    outputSchema,
   } = options;
 
   const extension = declareDiscoveryExtension({
@@ -572,6 +626,10 @@ function createDiscoveryExtension(options = {}) {
     }
   }
 
+  if (outputSchema && extension?.bazaar?.schema?.properties && typeof extension.bazaar.schema.properties === "object") {
+    extension.bazaar.schema.properties.output = outputSchema;
+  }
+
   return extension;
 }
 
@@ -597,6 +655,7 @@ function createPricedRoute(config, legacyDescription, legacyPayTo = PAY_TO) {
     inputSchema,
     bodyType,
     outputExample,
+    outputSchema,
   } = options;
   const normalizedPrice = typeof price === "string" && !price.startsWith("$") ? `$${price}` : price;
 
@@ -624,8 +683,497 @@ function createPricedRoute(config, legacyDescription, legacyPayTo = PAY_TO) {
       inputSchema,
       bodyType,
       outputExample,
+      outputSchema,
     }),
   };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+const JSON_PRIMITIVE_SCHEMA = {
+  oneOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "integer" },
+    { type: "boolean" },
+    { type: "null" },
+  ],
+};
+
+const FLEXIBLE_OBJECT_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+};
+
+const REPORT_META_SCHEMA = {
+  type: "object",
+  properties: {
+    report_type: { type: "string" },
+    title: { type: "string" },
+    report_title: { type: "string" },
+    name: { type: "string" },
+    author: { type: "string" },
+    owner: { type: "string" },
+    date: { type: "string" },
+    version: { type: "string" },
+  },
+  additionalProperties: true,
+};
+
+const REPORT_TABLE_ROW_SCHEMA = {
+  oneOf: [
+    { type: "object", additionalProperties: JSON_PRIMITIVE_SCHEMA },
+    { type: "array", items: JSON_PRIMITIVE_SCHEMA },
+  ],
+};
+
+const REPORT_TABLE_SCHEMA = {
+  type: "object",
+  properties: {
+    columns: {
+      type: "array",
+      items: { type: "string" },
+    },
+    rows: {
+      type: "array",
+      items: REPORT_TABLE_ROW_SCHEMA,
+    },
+  },
+  additionalProperties: true,
+};
+
+const HEADLINE_METRIC_SCHEMA = {
+  type: "object",
+  properties: {
+    label: { type: "string" },
+    value: JSON_PRIMITIVE_SCHEMA,
+    unit: { type: "string" },
+  },
+  required: ["label"],
+  additionalProperties: true,
+};
+
+const SHARED_REPORT_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    report_meta: REPORT_META_SCHEMA,
+    executive_summary: {
+      type: "array",
+      items: { type: "string" },
+    },
+    headline_metrics: {
+      type: "array",
+      items: HEADLINE_METRIC_SCHEMA,
+    },
+    tables: {
+      type: "object",
+      additionalProperties: REPORT_TABLE_SCHEMA,
+    },
+    export_artifacts: {
+      type: "object",
+      properties: {
+        workbook_rows: {
+          type: "object",
+          additionalProperties: {
+            type: "array",
+            items: REPORT_TABLE_ROW_SCHEMA,
+          },
+        },
+      },
+      additionalProperties: true,
+    },
+    chart_hints: {
+      type: "array",
+      items: FLEXIBLE_OBJECT_SCHEMA,
+    },
+    result: FLEXIBLE_OBJECT_SCHEMA,
+  },
+  required: ["report_meta"],
+  additionalProperties: true,
+};
+
+const LEGACY_DOCX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    metadata: FLEXIBLE_OBJECT_SCHEMA,
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          heading: { type: "string" },
+          body: { type: "string" },
+          bullets: {
+            type: "array",
+            items: { type: "string" },
+          },
+          table: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+        },
+        additionalProperties: true,
+      },
+    },
+  },
+  required: ["title", "sections"],
+  additionalProperties: true,
+};
+
+const LEGACY_XLSX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    sheets: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          headers: {
+            type: "array",
+            items: { type: "string" },
+          },
+          columns: {
+            type: "array",
+            items: { type: "string" },
+          },
+          rows: {
+            type: "array",
+            items: REPORT_TABLE_ROW_SCHEMA,
+          },
+          formulas: {
+            type: "array",
+            items: FLEXIBLE_OBJECT_SCHEMA,
+          },
+        },
+        required: ["name", "rows"],
+        additionalProperties: true,
+      },
+    },
+  },
+  required: ["title", "sheets"],
+  additionalProperties: true,
+};
+
+const LEGACY_PDF_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    markdown: { type: "string" },
+    html: { type: "string" },
+    note: { type: "string" },
+    lines: {
+      type: "array",
+      items: { type: "string" },
+    },
+    sections: {
+      type: "array",
+      items: FLEXIBLE_OBJECT_SCHEMA,
+    },
+    data: FLEXIBLE_OBJECT_SCHEMA,
+  },
+  additionalProperties: true,
+};
+
+const DOCUMENT_ARTIFACT_RESPONSE_SCHEMA = {
+  type: "object",
+  properties: {
+    success: { type: "boolean" },
+    data: {
+      type: "object",
+      properties: {
+        documentType: { type: "string" },
+        fileName: { type: "string" },
+        mimeType: { type: "string" },
+        artifact: {
+          type: "object",
+          properties: {
+            type: { type: "string" },
+            name: { type: "string" },
+            sizeBytes: { type: "integer" },
+            contentBase64: { type: "string" },
+          },
+          required: ["type", "name", "sizeBytes", "contentBase64"],
+          additionalProperties: true,
+        },
+        preview: {
+          type: "array",
+          items: { type: "string" },
+        },
+        capabilities: {
+          type: "object",
+          additionalProperties: true,
+        },
+      },
+      required: ["documentType", "fileName", "mimeType", "artifact"],
+      additionalProperties: true,
+    },
+    source: { type: "string" },
+  },
+  required: ["success", "data", "source"],
+  additionalProperties: true,
+};
+
+const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
+  "POST /api/tools/report/generate": {
+    description: "Generate a styled report PDF from the shared report model or a generic PDF payload.",
+    inputExample: {
+      report_meta: { report_type: "ops-brief", title: "Weekly Ops Brief", author: "AurelianFlo" },
+      executive_summary: [
+        "Core routes stayed available through the reporting window.",
+        "Manual review remains recommended for billing anomalies.",
+      ],
+      headline_metrics: [
+        { label: "Uptime", value: "99.9%", unit: "percent" },
+        { label: "Incidents", value: 1, unit: "count" },
+      ],
+      tables: {
+        route_health: {
+          columns: ["route", "status"],
+          rows: [{ route: "/api/tools/report/generate", status: "healthy" }],
+        },
+      },
+    },
+    inputSchema: {
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_PDF_INPUT_SCHEMA],
+    },
+    outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+  },
+  "POST /api/tools/docx/generate": {
+    description: "Generate a DOCX file from the shared report model or a structured DOCX document payload.",
+    inputExample: {
+      report_meta: { report_type: "partner-brief", title: "Partner Brief", author: "AurelianFlo" },
+      executive_summary: ["Partner scope is defined and ready for review."],
+      tables: {
+        timeline: {
+          columns: ["phase", "status"],
+          rows: [
+            { phase: "Summary", status: "complete" },
+            { phase: "Scope", status: "complete" },
+            { phase: "Timeline", status: "draft" },
+          ],
+        },
+      },
+    },
+    inputSchema: {
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_DOCX_INPUT_SCHEMA],
+    },
+    outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+  },
+  "POST /api/tools/xlsx/generate": {
+    description: "Generate an XLSX workbook from the shared report model or a structured workbook payload.",
+    inputExample: {
+      report_meta: { report_type: "data-workbook", title: "Weekly Ops Workbook", author: "AurelianFlo" },
+      executive_summary: ["Workbook rows are generated from the shared report model."],
+      tables: {
+        data: {
+          columns: ["name", "value"],
+          rows: [{ name: "a", value: 1 }, { name: "b", value: 2 }],
+        },
+      },
+    },
+    inputSchema: {
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_XLSX_INPUT_SCHEMA],
+    },
+    outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+  },
+  "POST /api/tools/pdf/generate": {
+    description: "Generate a PDF from markdown, HTML, structured JSON, or other generic PDF input payloads.",
+    inputExample: {
+      title: "Q2 Planning Memo",
+      markdown: "# Q2 Planning Memo\n\n- Launch core routes\n- Verify monitoring\n",
+    },
+    inputSchema: LEGACY_PDF_INPUT_SCHEMA,
+    outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+  },
+};
+const PUBLIC_CORE_DISCOVERY_ROUTE_KEYS = new Set([
+  "GET /api/ofac-sanctions-screening/*",
+  "GET /api/vendor-onboarding/restricted-party-batch",
+  "GET /api/restricted-party/screen/*",
+  "GET /api/vendor-entity-brief",
+  "POST /api/workflows/finance/cash-runway-forecast",
+  "POST /api/workflows/finance/pricing-plan-compare",
+  "POST /api/workflows/sports/nba/championship-forecast",
+  "POST /api/workflows/sports/nfl/championship-forecast",
+  "POST /api/workflows/sports/mlb/championship-forecast",
+  "POST /api/workflows/sports/nhl/championship-forecast",
+  "POST /api/workflows/vendor/risk-assessment",
+  "POST /api/sim/probability",
+  "POST /api/sim/batch-probability",
+  "POST /api/sim/compare",
+  "POST /api/sim/sensitivity",
+  "POST /api/sim/forecast",
+  "POST /api/sim/composed",
+  "POST /api/sim/optimize",
+  "POST /api/sim/report",
+  "POST /api/tools/report/generate",
+  "POST /api/tools/docx/generate",
+  "POST /api/tools/xlsx/generate",
+  "POST /api/tools/pdf/generate",
+]);
+const WORKFLOW_COMPATIBILITY_ALIASES = [
+  {
+    seller: "sports-workflows",
+    sourceKey: "POST /api/workflows/sports/nba/championship-forecast",
+    aliasPath: "/api/workflows/sports/nba/playoff-forecast",
+  },
+  {
+    seller: "sports-workflows",
+    sourceKey: "POST /api/workflows/sports/nfl/championship-forecast",
+    aliasPath: "/api/workflows/sports/nfl/playoff-forecast",
+  },
+  {
+    seller: "sports-workflows",
+    sourceKey: "POST /api/workflows/sports/mlb/championship-forecast",
+    aliasPath: "/api/workflows/sports/mlb/playoff-forecast",
+  },
+  {
+    seller: "sports-workflows",
+    sourceKey: "POST /api/workflows/sports/nhl/championship-forecast",
+    aliasPath: "/api/workflows/sports/nhl/playoff-forecast",
+  },
+  {
+    seller: "vendor-workflows",
+    sourceKey: "POST /api/workflows/vendor/risk-assessment",
+    aliasPath: "/api/workflows/vendor/risk-forecast",
+  },
+  {
+    seller: "finance-workflows",
+    sourceKey: "POST /api/workflows/finance/pricing-plan-compare",
+    aliasPath: "/api/workflows/finance/pricing-scenario-forecast",
+  },
+];
+
+function inferSchemaFromExample(value) {
+  if (Array.isArray(value)) {
+    const itemSchema = value.length ? inferSchemaFromExample(value[0]) : { type: "string" };
+    return {
+      type: "array",
+      items: itemSchema,
+    };
+  }
+
+  if (isPlainObject(value)) {
+    const properties = {};
+    const required = [];
+
+    for (const [key, child] of Object.entries(value)) {
+      properties[key] = inferSchemaFromExample(child);
+      required.push(key);
+    }
+
+    return {
+      type: "object",
+      properties,
+      ...(required.length ? { required } : {}),
+      additionalProperties: false,
+    };
+  }
+
+  if (typeof value === "number") {
+    return {
+      type: Number.isInteger(value) ? "integer" : "number",
+    };
+  }
+
+  if (typeof value === "boolean") {
+    return { type: "boolean" };
+  }
+
+  if (value == null) {
+    return { type: "string", nullable: true };
+  }
+
+  return { type: "string" };
+}
+
+function normalizeGeneratedInputExample(route = {}) {
+  if (isPlainObject(route.inputExample) && isPlainObject(route.inputExample.input)) {
+    return route.inputExample.input;
+  }
+  return route.inputExample ?? null;
+}
+
+function createGeneratedCatalogRouteConfig(payTo = PAY_TO, options = {}) {
+  const existingRouteKeys = options.existingRouteKeys instanceof Set
+    ? options.existingRouteKeys
+    : new Set();
+  const generatedRoutes = Array.isArray(generatedCatalog?.routes)
+    ? generatedCatalog.routes
+    : [];
+  const entries = {};
+
+  for (const route of generatedRoutes) {
+    const routeKey = String(route?.key || "").trim();
+    if (!routeKey || existingRouteKeys.has(routeKey) || entries[routeKey]) {
+      continue;
+    }
+
+    const method = String(route?.method || routeKey.split(" ")[0] || "GET").toUpperCase();
+    const routePath =
+      route?.canonicalPath ||
+      route?.resourcePath ||
+      route?.expressPath ||
+      route?.routePath ||
+      "";
+
+    if (!routePath) {
+      continue;
+    }
+
+    const inputExample = normalizeGeneratedInputExample(route);
+    const queryExample = method === "GET" && isPlainObject(route?.queryExample)
+      ? route.queryExample
+      : undefined;
+    const routeOptions = {
+      price: route?.price || "0.01",
+      description: route?.description || `${routeKey} generated endpoint`,
+      payTo,
+      resourcePath: routePath,
+      category: route?.category,
+      tags: Array.isArray(route?.tags) ? route.tags : [],
+      bodyType: route?.bodyType || (method === "GET" ? undefined : "json"),
+      outputExample: route?.outputExample,
+    };
+    const override = GENERATED_DOCUMENT_ROUTE_OVERRIDES[routeKey];
+
+    if (queryExample) {
+      routeOptions.queryExample = queryExample;
+      routeOptions.querySchema = inferSchemaFromExample(queryExample);
+    }
+
+    if (method !== "GET" && inputExample !== null && inputExample !== undefined) {
+      routeOptions.inputExample = inputExample;
+      routeOptions.inputSchema = inferSchemaFromExample(inputExample);
+    }
+
+    if (override) {
+      Object.assign(routeOptions, override);
+    }
+
+    entries[routeKey] = createPricedRoute(routeOptions);
+  }
+
+  return entries;
+}
+
+function shouldIncludeRouteInDiscovery(routeKey, options = {}) {
+  const scope = String(options.discoveryScope || "full").toLowerCase();
+  if (scope !== "public") {
+    return true;
+  }
+
+  return PUBLIC_CORE_DISCOVERY_ROUTE_KEYS.has(routeKey);
 }
 
 function getBundledSellerRoutes() {
@@ -642,8 +1190,23 @@ function getBundledSellerRoutes() {
     : genericSimulatorSellerConfig?.route
       ? [genericSimulatorSellerConfig.route]
       : [];
+  const sportsWorkflowRoutes = Array.isArray(sportsWorkflowSellerConfig?.routes)
+    ? sportsWorkflowSellerConfig.routes
+    : sportsWorkflowSellerConfig?.route
+      ? [sportsWorkflowSellerConfig.route]
+      : [];
+  const vendorWorkflowRoutes = Array.isArray(vendorWorkflowSellerConfig?.routes)
+    ? vendorWorkflowSellerConfig.routes
+    : vendorWorkflowSellerConfig?.route
+      ? [vendorWorkflowSellerConfig.route]
+      : [];
+  const financeWorkflowRoutes = Array.isArray(financeWorkflowSellerConfig?.routes)
+    ? financeWorkflowSellerConfig.routes
+    : financeWorkflowSellerConfig?.route
+      ? [financeWorkflowSellerConfig.route]
+      : [];
 
-  return [
+  const bundledRoutes = [
     ...restrictedRoutes.map((route) => ({
       ...route,
       payTo: restrictedPartySellerConfig?.payTo || PAY_TO,
@@ -659,7 +1222,42 @@ function getBundledSellerRoutes() {
       payTo: genericSimulatorSellerConfig?.payTo || PAY_TO,
       seller: "generic-parameter-simulator",
     })),
+    ...sportsWorkflowRoutes.map((route) => ({
+      ...route,
+      payTo: sportsWorkflowSellerConfig?.payTo || PAY_TO,
+      seller: "sports-workflows",
+    })),
+    ...vendorWorkflowRoutes.map((route) => ({
+      ...route,
+      payTo: vendorWorkflowSellerConfig?.payTo || PAY_TO,
+      seller: "vendor-workflows",
+    })),
+    ...financeWorkflowRoutes.map((route) => ({
+      ...route,
+      payTo: financeWorkflowSellerConfig?.payTo || PAY_TO,
+      seller: "finance-workflows",
+    })),
   ];
+
+  const routesByKey = new Map(bundledRoutes.map((route) => [route.key, route]));
+  const compatibilityAliases = WORKFLOW_COMPATIBILITY_ALIASES.flatMap((alias) => {
+    const sourceRoute = routesByKey.get(alias.sourceKey);
+    if (!sourceRoute || sourceRoute.seller !== alias.seller) {
+      return [];
+    }
+
+    return [{
+      ...sourceRoute,
+      key: `${String(sourceRoute.method || "POST").toUpperCase()} ${alias.aliasPath}`,
+      routePath: alias.aliasPath,
+      expressPath: alias.aliasPath,
+      resourcePath: alias.aliasPath,
+      canonicalPath: sourceRoute.canonicalPath || sourceRoute.routePath || alias.aliasPath,
+      compatibilityAlias: true,
+    }];
+  });
+
+  return [...bundledRoutes, ...compatibilityAliases];
 }
 
 function createBundledSellerRouteConfig() {
@@ -689,6 +1287,7 @@ function createBundledSellerRouteConfig() {
       inputSchema: route.inputSchema,
       bodyType: route.bodyType,
       outputExample: route.outputExample,
+      outputSchema: route.outputSchema,
     });
   }
 
@@ -1675,7 +2274,9 @@ function createExpandedRouteConfig(payTo = PAY_TO) {
 }
 
 function createRouteConfig(payTo = PAY_TO) {
-  return {
+  const bundledSellerRoutes = createBundledSellerRouteConfig();
+  const expandedRoutes = createExpandedRouteConfig(payTo);
+  const routeEntries = {
     "GET /api/vin/*": createPricedRoute({
       price: "0.008",
       description:
@@ -2220,8 +2821,15 @@ function createRouteConfig(payTo = PAY_TO) {
         source: "Congress.gov API",
       },
     }),
-    ...createExpandedRouteConfig(payTo),
-    ...createBundledSellerRouteConfig(),
+    ...expandedRoutes,
+    ...bundledSellerRoutes,
+  };
+
+  return {
+    ...routeEntries,
+    ...createGeneratedCatalogRouteConfig(payTo, {
+      existingRouteKeys: new Set(Object.keys(routeEntries)),
+    }),
   };
 }
 
@@ -2339,6 +2947,7 @@ function buildCatalogEntries(routes = routeConfig, options = {}) {
   const includeDiscoveryFields = Boolean(options.includeDiscoveryFields);
   return Object.entries(routes)
     .filter(([key]) => !shouldHideRouteInProduction(key, options))
+    .filter(([key]) => shouldIncludeRouteInDiscovery(key, options))
     .map(([key, config]) => {
     const [method, path] = key.split(" ");
     const paymentOption = getPrimaryPaymentOption(config);
@@ -2561,133 +3170,8 @@ function buildWellKnownEndpointEntries(routes = routeConfig, options = {}) {
       },
       rateLimit: getRateLimitHintForPath(entry.path),
       ...(composability ? { composability } : {}),
-      };
-    });
-}
-
-const DEFAULT_CORE_DISCOVERY_ALLOWLIST_ROUTE_KEYS = Object.freeze([
-  "POST /api/sim/probability",
-  "POST /api/sim/compare",
-  "POST /api/sim/sensitivity",
-  "POST /api/sim/forecast",
-  "POST /api/sim/composed",
-  "POST /api/sim/optimize",
-  "GET /api/vendor-entity-brief",
-  "GET /api/ofac-sanctions-screening/*",
-  "GET /api/restricted-party/screen/*",
-  "GET /api/vendor-onboarding/restricted-party-batch",
-  "GET /api/treasury-rates",
-  "GET /api/fed-funds-rate",
-  "GET /api/yield-curve",
-  "GET /api/mortgage-rates",
-  "GET /api/credit-spreads",
-  "GET /api/real-rates",
-  "GET /api/inflation-expectations",
-  "GET /api/bls/cpi",
-  "GET /api/bls/unemployment",
-  "GET /api/weather/current/*",
-  "GET /api/weather/current",
-  "GET /api/weather/forecast",
-  "GET /api/weather/historical",
-  "GET /api/weather/alerts/*",
-  "GET /api/weather/marine",
-  "GET /api/weather/extremes",
-  "GET /api/weather/freeze-risk",
-  "GET /api/uv-index/*",
-  "GET /api/whois/*",
-  "GET /api/dns/*",
-  "GET /api/ssl/*",
-  "GET /api/domain-availability/*",
-  "GET /api/courts/cases",
-  "GET /api/courts/opinions",
-  "GET /api/courts/citations",
-  "GET /api/courts/court-info",
-  "GET /api/vin/*",
-  "GET /api/exchange-rates/quote/*",
-  "GET /api/geocode",
-  "GET /api/reverse-geocode",
-]);
-
-function getDiscoverySurfaceFromEntry(entry = {}) {
-  const path = String(entry?.path || "").toLowerCase();
-  if (path.startsWith("/api/sim/") || path.startsWith("/api/tools/")) {
-    return "tools";
-  }
-  return "data";
-}
-
-function selectCoreDiscoveryRouteKeys(catalog = []) {
-  const available = new Set(catalog.map((entry) => String(entry?.routeKey || "").trim()).filter(Boolean));
-  const selected = DEFAULT_CORE_DISCOVERY_ALLOWLIST_ROUTE_KEYS.filter((routeKey) => available.has(routeKey));
-  if (selected.length > 0) {
-    return new Set(selected);
-  }
-
-  return new Set(
-    catalog
-      .slice(0, 40)
-      .map((entry) => String(entry?.routeKey || "").trim())
-      .filter(Boolean),
-  );
-}
-
-function buildCoreDiscoveryNavigation(baseUrl, coreRouteCount, fullRouteCount) {
-  return {
-    mode: "core40",
-    default: `${baseUrl}/api`,
-    expand: {
-      tools: `${baseUrl}/api?profile=full&surface=tools`,
-      data: `${baseUrl}/api?profile=full&surface=data`,
-      full: `${baseUrl}/api?profile=full`,
-    },
-    coreRouteCount,
-    fullRouteCount,
-  };
-}
-
-function buildApiDiscoveryPayload(routes = routeConfig, options = {}) {
-  const env = options.env || process.env;
-  const req = options.req;
-  const baseUrl = getRequestBaseUrl(req);
-  const metadata = getOriginMetadata(env);
-  const allCatalog = buildCatalogEntries(routes, { includeDiscoveryFields: true, env });
-  const requestedProfile = String(req?.query?.profile || "").trim().toLowerCase();
-  const requestedSurface = String(req?.query?.surface || "").trim().toLowerCase();
-  const useCoreProfile = !requestedProfile || requestedProfile === "compact" || requestedProfile === "core";
-  const coreRouteKeys = selectCoreDiscoveryRouteKeys(allCatalog);
-  let catalog = useCoreProfile
-    ? allCatalog.filter((entry) => coreRouteKeys.has(entry.routeKey))
-    : allCatalog;
-
-  if (requestedSurface === "tools" || requestedSurface === "data") {
-    catalog = catalog.filter((entry) => getDiscoverySurfaceFromEntry(entry) === requestedSurface);
-  }
-
-  return {
-    title: metadata.title,
-    name: metadata.title,
-    description: metadata.description,
-    version: "1.0.0",
-    generatedAt: new Date().toISOString(),
-    baseUrl,
-    discoveryUrl: `${baseUrl}/api`,
-    healthUrl: `${baseUrl}/`,
-    profile: useCoreProfile ? "compact" : "full",
-    endpoints: catalog.length,
-    totalEndpoints: allCatalog.length,
-    filteredEndpointCount: catalog.length,
-    filters: {
-      surface: requestedSurface || null,
-    },
-    navigation: buildCoreDiscoveryNavigation(baseUrl, coreRouteKeys.size, allCatalog.length),
-    catalog,
-    payment: {
-      protocol: "x402",
-      network: "Base",
-      chainId: X402_NETWORK,
-      currency: "USDC",
-    },
-  };
+    };
+  });
 }
 
 function summarizePricing(endpoints = []) {
@@ -2795,37 +3279,38 @@ function buildBundledSellerResourceUrls(options = {}) {
 function buildWellKnownManifest(manifest = WELL_KNOWN_X402_AURELIAN, routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   const metadata = getOriginMetadata(env);
+  const hiddenRouteMatchers = options.hiddenRouteMatchers || buildHiddenRouteMatchers();
+  const staticResources = Array.isArray(manifest?.resources)
+    ? manifest.resources.filter(
+        (resourceUrl) => !shouldHideResourceUrlInProduction(resourceUrl, { env, hiddenRouteMatchers }),
+      )
+    : [];
+  const bundledSellerResources = buildBundledSellerResourceUrls({ env, hiddenRouteMatchers });
+  const resources = [...new Set([...staticResources, ...bundledSellerResources])];
   const endpoints = buildWellKnownEndpointEntries(routes, { env });
-  const coreRouteKeys = selectCoreDiscoveryRouteKeys(
-    buildCatalogEntries(routes, { includeDiscoveryFields: true, env }),
-  );
-  const coreEndpoints = endpoints.filter((entry) => coreRouteKeys.has(entry.routeKey));
-  const resources = [...new Set(coreEndpoints.map((entry) => entry.exampleUrl).filter(Boolean))];
   const ownershipProofs = resolveOwnershipProofs(manifest, env);
 
   return {
     ...manifest,
     title: metadata.title,
-      name: metadata.title,
-      description: metadata.description,
-      icon: `${CANONICAL_BASE_URL}/favicon.ico`,
-      resources,
-      ownershipProofs,
-      instructions: appendSimComposabilityInstructions(manifest?.instructions),
-      endpointCount: coreEndpoints.length,
-      fullEndpointCount: endpoints.length,
-      pricing: summarizePricing(coreEndpoints),
-      rateLimits: {
-        policy: "Upstream provider limits apply per endpoint; see each endpoint.rateLimit entry.",
-        enforcement: "Best effort",
+    name: metadata.title,
+    description: metadata.description,
+    icon: `${CANONICAL_BASE_URL}/favicon.ico`,
+    resources,
+    ownershipProofs,
+    instructions: appendSimComposabilityInstructions(manifest?.instructions),
+    endpointCount: endpoints.length,
+    pricing: summarizePricing(endpoints),
+    rateLimits: {
+      policy: "Upstream provider limits apply per endpoint; see each endpoint.rateLimit entry.",
+      enforcement: "Best effort",
     },
-      sla: {
-        availability: "Best effort",
-        notes: "No formal uptime SLA is guaranteed.",
-      },
-      discovery: buildCoreDiscoveryNavigation(CANONICAL_BASE_URL, coreEndpoints.length, endpoints.length),
-      endpoints: coreEndpoints,
-    };
+    sla: {
+      availability: "Best effort",
+      notes: "No formal uptime SLA is guaranteed.",
+    },
+    endpoints,
+  };
 }
 
 function getRequestBaseUrl(req) {
@@ -3670,14 +4155,14 @@ function createSettleTestHandler(options = {}) {
 function createHealthHandler(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   return function healthHandler(req, res) {
-    const payload = buildApiDiscoveryPayload(routes, { env, req });
+    const catalog = buildCatalogEntries(routes);
     const metadata = getOriginMetadata(env);
     if (shouldRenderHealthHtml(req)) {
       const html = buildOriginLandingHtml({
         title: metadata.title,
         description: metadata.description,
         baseUrl: getRequestBaseUrl(req),
-        endpointCount: payload.totalEndpoints,
+        endpointCount: catalog.length,
       });
       return res.type("text/html; charset=utf-8").send(html);
     }
@@ -3687,15 +4172,8 @@ function createHealthHandler(routes = routeConfig, options = {}) {
       name: metadata.title,
       description: metadata.description,
       version: "1.0.0",
-      profile: payload.profile,
-      endpoints: payload.endpoints,
-      totalEndpoints: payload.totalEndpoints,
-      catalog: payload.catalog,
-      discovery: {
-        core: `${payload.baseUrl}/api`,
-        full: `${payload.baseUrl}/api?profile=full`,
-      },
-      navigation: payload.navigation,
+      endpoints: catalog.length,
+      catalog,
       payment: { network: "Base", currency: "USDC", protocol: "x402" },
     });
   };
@@ -3703,8 +4181,34 @@ function createHealthHandler(routes = routeConfig, options = {}) {
 
 function createApiDiscoveryHandler(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
+  const discoveryScope = options.discoveryScope || "full";
   return function apiDiscoveryHandler(req, res) {
-    res.json(buildApiDiscoveryPayload(routes, { env, req }));
+    const baseUrl = getRequestBaseUrl(req);
+    const metadata = getOriginMetadata(env);
+    const catalog = buildCatalogEntries(routes, {
+      includeDiscoveryFields: true,
+      env,
+      discoveryScope,
+    });
+
+    res.json({
+      title: metadata.title,
+      name: metadata.title,
+      description: metadata.description,
+      version: "1.0.0",
+      generatedAt: new Date().toISOString(),
+      baseUrl,
+      discoveryUrl: `${baseUrl}/api`,
+      healthUrl: `${baseUrl}/`,
+      endpoints: catalog.length,
+      catalog,
+      payment: {
+        protocol: "x402",
+        network: "Base",
+        chainId: X402_NETWORK,
+        currency: "USDC",
+      },
+    });
   };
 }
 
@@ -3758,7 +4262,9 @@ function buildOpenApiDocument(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   const metadata = getOriginMetadata(env);
   const paths = {};
-  const routeEntries = Object.entries(routes).filter(([routeKey]) => !shouldHideRouteInProduction(routeKey, { env }));
+  const routeEntries = Object.entries(routes)
+    .filter(([routeKey]) => !shouldHideRouteInProduction(routeKey, { env }))
+    .filter(([routeKey]) => shouldIncludeRouteInDiscovery(routeKey, options));
 
   for (const [routeKey, config] of routeEntries) {
     const [method = "GET", routePath = "/"] = String(routeKey).split(" ");
@@ -3854,8 +4360,9 @@ function buildOpenApiDocument(routes = routeConfig, options = {}) {
 
 function createOpenApiHandler(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
+  const discoveryScope = options.discoveryScope || "full";
   return function openApiHandler(_req, res) {
-    res.json(buildOpenApiDocument(routes, { env }));
+    res.json(buildOpenApiDocument(routes, { env, discoveryScope }));
   };
 }
 
@@ -3908,19 +4415,16 @@ function createWellKnownX402AurelianHandler(
 
 function buildWellKnownX402V1Manifest(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
-  const catalog = buildCatalogEntries(routes, { includeDiscoveryFields: true, env });
-  const coreRouteKeys = selectCoreDiscoveryRouteKeys(catalog);
-  const resources = catalog
-    .filter((entry) => coreRouteKeys.has(entry.routeKey))
-    .map((entry) => {
-      const examplePath = getExamplePathFromResource(entry.exampleUrl, entry.path);
-      return `${String(entry.method || "GET").toUpperCase()} ${examplePath}`;
+  const resources = Object.entries(routes)
+    .filter(([routeKey]) => !shouldHideRouteInProduction(routeKey, { env }))
+    .map(([routeKey]) => {
+      const [method = "GET", routePath = "/"] = String(routeKey).split(" ");
+      return `${String(method).toUpperCase()} ${buildOpenApiPathTemplate(routePath)}`;
     });
 
   return {
     version: 1,
     resources,
-    discovery: buildCoreDiscoveryNavigation(CANONICAL_BASE_URL, resources.length, catalog.length),
   };
 }
 
@@ -4003,12 +4507,20 @@ function mountPaidRoutes(target) {
       handler = vendorEntityBriefPrimaryHandler;
     } else if (route.seller === "generic-parameter-simulator") {
       handler = genericSimulatorPrimaryHandler;
+    } else if (route.seller === "sports-workflows") {
+      handler = sportsWorkflowPrimaryHandler;
+    } else if (route.seller === "vendor-workflows") {
+      handler = vendorWorkflowPrimaryHandler;
+    } else if (route.seller === "finance-workflows") {
+      handler = financeWorkflowPrimaryHandler;
     } else if (route.handlerId === "batch") {
       handler = restrictedPartyBatchHandler;
     }
 
     target[method](route.expressPath, handler);
   }
+
+  target.use(generatedRoutesRouter);
 }
 
 function createApp(options = {}) {
@@ -4063,6 +4575,10 @@ function createApp(options = {}) {
   const wellKnownX402Aurelian = options.wellKnownX402Aurelian ?? WELL_KNOWN_X402_AURELIAN;
 
   const app = express();
+  const apiDiscoveryHandler = createApiDiscoveryHandler(routes, { env, discoveryScope: "public" });
+  const fullApiDiscoveryHandler = createApiDiscoveryHandler(routes, { env, discoveryScope: "full" });
+  const openApiHandler = createOpenApiHandler(routes, { env, discoveryScope: "public" });
+  const fullOpenApiHandler = createOpenApiHandler(routes, { env, discoveryScope: "full" });
   app.use(express.json());
   app.use(createSimCompatibleResponseMiddleware());
 
@@ -4078,20 +4594,15 @@ function createApp(options = {}) {
   }
 
   app.get("/", createHealthHandler(routes, { env }));
-  app.get("/api/system", (_req, res) => {
-    res.redirect(308, "/api/system/discovery");
-  });
-  app.get("/api/system/health", createHealthHandler(routes, { env }));
-  app.get("/api/system/discovery", createApiDiscoveryHandler(routes, { env }));
-  app.get("/api/system/discovery/full", (req, res) => {
-    req.query = { ...req.query, profile: "full" };
-    return createApiDiscoveryHandler(routes, { env })(req, res);
-  });
-  app.get("/api", createApiDiscoveryHandler(routes, { env }));
+  app.get("/api", apiDiscoveryHandler);
+  app.get("/api/system/discovery/core", apiDiscoveryHandler);
+  app.get("/api/system/discovery/full", fullApiDiscoveryHandler);
   app.get("/openapi", (_req, res) => {
     res.redirect(308, "/openapi.json");
   });
-  app.get("/openapi.json", createOpenApiHandler(routes, { env }));
+  app.get("/openapi.json", openApiHandler);
+  app.get("/openapi-full.json", fullOpenApiHandler);
+  app.get("/api/system/openapi.json", fullOpenApiHandler);
   app.get("/favicon.ico", createFaviconHandler());
   app.get("/icon.png", createFaviconHandler());
   app.get("/api/sim", createSimLandingHandler(routes, { env }));

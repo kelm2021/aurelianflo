@@ -1,0 +1,45 @@
+{
+  "as_of_date": "2026-04-03",
+  "workflow": "vendor.risk_assessment",
+  "mode": "vendor_batch",
+  "inputs": {
+    "vendors": [
+      {
+        "name": "SBERBANK",
+        "country": "CZ",
+        "criticality": "high",
+        "annual_spend_usd": 2500000,
+        "cross_border": true,
+        "service_category": "banking",
+        "notes": "New payout rail partner"
+      },
+      {
+        "name": "Acme Data Services",
+        "country": "US",
+        "criticality": "medium",
+        "annual_spend_usd": 320000,
+        "cross_border": false,
+        "service_category": "software",
+        "notes": "Existing analytics provider"
+      },
+      {
+        "name": "VTB BANK PJSC",
+        "country": "RU",
+        "criticality": "critical",
+        "annual_spend_usd": 1500000,
+        "cross_border": true,
+        "service_category": "banking",
+        "notes": "Candidate treasury banking partner"
+      }
+    ]
+  },
+  "model_options": {
+    "seed": 12345,
+    "screening_threshold": 90,
+    "screening_limit": 3,
+    "include_report": true,
+    "include_artifacts": [
+      "xlsx"
+    ]
+  }
+}

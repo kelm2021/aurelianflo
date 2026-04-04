@@ -1,0 +1,23 @@
+{
+  "as_of_date": "2026-04-03",
+  "workflow": "finance.cash_runway_forecast",
+  "mode": "single_case",
+  "inputs": {
+    "company_name": "Northwind Labs",
+    "current_cash_usd": 2400000,
+    "monthly_burn_usd": 280000,
+    "monthly_revenue_usd": 170000,
+    "burn_growth_rate_monthly": 0.015,
+    "revenue_growth_rate_monthly": 0.035,
+    "burn_volatility_pct": 0.1,
+    "revenue_volatility_pct": 0.15,
+    "runway_threshold_usd": 100000
+  },
+  "model_options": {
+    "seed": 20260403,
+    "simulations": 8000,
+    "horizon_months": 24,
+    "include_report": false,
+    "include_artifacts": []
+  }
+}

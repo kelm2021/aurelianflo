@@ -1,0 +1,529 @@
+{
+  "analysis_type": "batch-probability",
+  "title": "2026 NBA Finals Winner Forecast",
+  "summary_focus": "Rank the most likely 2026 NBA champion based on current regular-season strength, point differential, seed position, and recent form as of April 3, 2026.",
+  "request": {
+    "scenarios": [
+      {
+        "label": "DET - Detroit Pistons",
+        "parameters": {
+          "win_pct": 0.7567,
+          "point_diff": 0.79,
+          "recent_form": 0.6,
+          "seed_strength": 1,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "BOS - Boston Celtics",
+        "parameters": {
+          "win_pct": 0.57,
+          "point_diff": 0.72,
+          "recent_form": 0.6,
+          "seed_strength": 0.9,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "NY - New York Knicks",
+        "parameters": {
+          "win_pct": 0.4533,
+          "point_diff": 0.61,
+          "recent_form": 0.4,
+          "seed_strength": 0.8,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "CLE - Cleveland Cavaliers",
+        "parameters": {
+          "win_pct": 0.41,
+          "point_diff": 0.41,
+          "recent_form": 0.4,
+          "seed_strength": 0.7,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "ATL - Atlanta Hawks",
+        "parameters": {
+          "win_pct": 0.2367,
+          "point_diff": 0.23,
+          "recent_form": 0.6,
+          "seed_strength": 0.6,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "PHI - Philadelphia 76ers",
+        "parameters": {
+          "win_pct": 0.1767,
+          "point_diff": -0.01,
+          "recent_form": 0.4,
+          "seed_strength": 0.5,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "TOR - Toronto Raptors",
+        "parameters": {
+          "win_pct": 0.1767,
+          "point_diff": 0.21,
+          "recent_form": 0,
+          "seed_strength": 0.4,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "CHA - Charlotte Hornets",
+        "parameters": {
+          "win_pct": 0.1067,
+          "point_diff": 0.48,
+          "recent_form": 0.4,
+          "seed_strength": 0.3,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "ORL - Orlando Magic",
+        "parameters": {
+          "win_pct": 0.0867,
+          "point_diff": -0.02,
+          "recent_form": -0.6,
+          "seed_strength": 0.2,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "MIA - Miami Heat",
+        "parameters": {
+          "win_pct": 0.0633,
+          "point_diff": 0.22,
+          "recent_form": -0.6,
+          "seed_strength": 0.1,
+          "conference_bonus": 0
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "OKC - Oklahoma City Thunder",
+        "parameters": {
+          "win_pct": 0.9733,
+          "point_diff": 1.14,
+          "recent_form": 0.8,
+          "seed_strength": 1,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "SA - San Antonio Spurs",
+        "parameters": {
+          "win_pct": 0.8867,
+          "point_diff": 0.85,
+          "recent_form": 1,
+          "seed_strength": 0.9,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "LAL - Los Angeles Lakers",
+        "parameters": {
+          "win_pct": 0.4967,
+          "point_diff": 0.15,
+          "recent_form": 0.6,
+          "seed_strength": 0.8,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "DEN - Denver Nuggets",
+        "parameters": {
+          "win_pct": 0.4533,
+          "point_diff": 0.48,
+          "recent_form": 0.6,
+          "seed_strength": 0.7,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "HOU - Houston Rockets",
+        "parameters": {
+          "win_pct": 0.3933,
+          "point_diff": 0.45,
+          "recent_form": 0.2,
+          "seed_strength": 0.6,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "MIN - Minnesota Timberwolves",
+        "parameters": {
+          "win_pct": 0.35,
+          "point_diff": 0.37,
+          "recent_form": 0.2,
+          "seed_strength": 0.5,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "PHX - Phoenix Suns",
+        "parameters": {
+          "win_pct": 0.15,
+          "point_diff": 0.15,
+          "recent_form": -0.4,
+          "seed_strength": 0.4,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "POR - Portland Trail Blazers",
+        "parameters": {
+          "win_pct": 0.0433,
+          "point_diff": -0.05,
+          "recent_form": 0.6,
+          "seed_strength": 0.3,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "LAC - LA Clippers",
+        "parameters": {
+          "win_pct": 0.02,
+          "point_diff": 0.11,
+          "recent_form": 0,
+          "seed_strength": 0.2,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      },
+      {
+        "label": "GS - Golden State Warriors",
+        "parameters": {
+          "win_pct": -0.1067,
+          "point_diff": -0.03,
+          "recent_form": -0.2,
+          "seed_strength": 0.1,
+          "conference_bonus": 0.08
+        },
+        "weights": {
+          "win_pct": 0.42,
+          "point_diff": 0.3,
+          "recent_form": 0.14,
+          "seed_strength": 0.09,
+          "conference_bonus": 0.05
+        },
+        "uncertainty": {
+          "win_pct": 0.18,
+          "point_diff": 0.28,
+          "recent_form": 0.32,
+          "seed_strength": 0.12,
+          "conference_bonus": 0.08
+        },
+        "outcome_noise": 0.92,
+        "threshold": 0.94
+      }
+    ]
+  }
+}

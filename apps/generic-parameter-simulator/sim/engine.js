@@ -1,11 +1,19 @@
-const MODEL_VERSION = "3.0.0";
+const MODEL_VERSION = "3.1.0";
 const DEFAULT_PARAMETER_WEIGHT = 1;
 const DEFAULT_PARAMETER_UNCERTAINTY = 0.1;
+const DEFAULT_OUTCOME_NOISE_PER_WEIGHT = 0.3;
 const DEFAULT_FORECAST_PERIODS = 12;
 const DEFAULT_OPTIMIZATION_ITERATIONS = 25;
 const Z_SCORE_95 = 1.96;
 
-const SCENARIO_KEYS = new Set(["parameters", "weights", "uncertainty", "bias", "threshold"]);
+const SCENARIO_KEYS = new Set([
+  "parameters",
+  "weights",
+  "uncertainty",
+  "outcome_noise",
+  "bias",
+  "threshold",
+]);
 
 function createError(error, message, details) {
   if (details === undefined) {
@@ -96,7 +104,47 @@ function percentile(sortedValues, quantile) {
   return sortedValues[lower] + (sortedValues[upper] - sortedValues[lower]) * weight;
 }
 
-function randomNormal(mean, stddev) {
+function hashSeed(input) {
+  const text = String(input);
+  let hash = 2166136261;
+
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function createSeededRandom(seed) {
+  let state = hashSeed(seed) || 1;
+
+  return function seededRandom() {
+    state += 0x6D2B79F5;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function createRandomSource(options = {}) {
+  if (options.seed === undefined) {
+    return Math.random;
+  }
+
+  return createSeededRandom(options.seed);
+}
+
+function deriveSeed(seed, label) {
+  if (seed === undefined) {
+    return undefined;
+  }
+
+  return hashSeed(`${seed}:${label}`);
+}
+
+function randomNormal(mean, stddev, random = Math.random) {
   if (stddev === 0) {
     return mean;
   }
@@ -105,11 +153,11 @@ function randomNormal(mean, stddev) {
   let u2 = 0;
 
   while (u1 <= Number.EPSILON) {
-    u1 = Math.random();
+    u1 = random();
   }
 
   while (u2 <= Number.EPSILON) {
-    u2 = Math.random();
+    u2 = random();
   }
 
   const radius = Math.sqrt(-2 * Math.log(u1));
@@ -124,9 +172,13 @@ function summarizeScores(scores) {
       mean: 0,
       stddev: 0,
       min: 0,
+      p05: 0,
       p10: 0,
+      p25: 0,
       p50: 0,
+      p75: 0,
       p90: 0,
+      p95: 0,
       max: 0,
     };
   }
@@ -142,11 +194,75 @@ function summarizeScores(scores) {
     mean: round(mean),
     stddev: round(stddev),
     min: round(sorted[0]),
+    p05: round(percentile(sorted, 0.05)),
     p10: round(percentile(sorted, 0.1)),
+    p25: round(percentile(sorted, 0.25)),
     p50: round(percentile(sorted, 0.5)),
+    p75: round(percentile(sorted, 0.75)),
     p90: round(percentile(sorted, 0.9)),
+    p95: round(percentile(sorted, 0.95)),
     max: round(sorted[sorted.length - 1]),
   };
+}
+
+function meanOfSlice(values) {
+  if (!values.length) {
+    return 0;
+  }
+
+  return values.reduce((acc, value) => acc + value, 0) / values.length;
+}
+
+function summarizeRiskMetrics(effectiveScores, threshold, successCount) {
+  if (!effectiveScores.length) {
+    return {
+      probability_above_threshold: 0,
+      probability_below_threshold: 0,
+      expected_shortfall_05: 0,
+      expected_upside_95: 0,
+      threshold_gap_p50: 0,
+    };
+  }
+
+  const sorted = [...effectiveScores].sort((a, b) => a - b);
+  const tailCount = Math.max(1, Math.ceil(sorted.length * 0.05));
+  const bottomTail = sorted.slice(0, tailCount);
+  const topTail = sorted.slice(sorted.length - tailCount);
+  const probabilityAboveThreshold = successCount / effectiveScores.length;
+  const median = percentile(sorted, 0.5);
+
+  return {
+    probability_above_threshold: round(probabilityAboveThreshold),
+    probability_below_threshold: round(1 - probabilityAboveThreshold),
+    expected_shortfall_05: round(meanOfSlice(bottomTail)),
+    expected_upside_95: round(meanOfSlice(topTail)),
+    threshold_gap_p50: round(median - threshold),
+  };
+}
+
+function estimateDefaultOutcomeNoise(weights) {
+  const aggregateAbsWeight = Object.values(weights).reduce(
+    (acc, value) => acc + Math.abs(value),
+    0,
+  );
+
+  return round(aggregateAbsWeight * DEFAULT_OUTCOME_NOISE_PER_WEIGHT, 6);
+}
+
+function classifySaturationRisk(probability) {
+  if (probability <= 0.02 || probability >= 0.98) {
+    return "critical";
+  }
+
+  if (probability <= 0.1 || probability >= 0.9) {
+    return "elevated";
+  }
+
+  if (probability <= 0.25 || probability >= 0.75) {
+    return "moderate";
+  }
+
+  return "low";
 }
 
 function normalizeScenario(rawScenario, options = {}) {
@@ -286,6 +402,24 @@ function normalizeScenario(rawScenario, options = {}) {
     uncertainty[key] = value;
   }
 
+  const rawOutcomeNoise = rawScenario.outcome_noise;
+  let outcomeNoise = rawOutcomeNoise;
+  let outcomeNoiseSource = "user";
+
+  if (outcomeNoise === undefined) {
+    outcomeNoise = estimateDefaultOutcomeNoise(weights);
+    outcomeNoiseSource = "default";
+  }
+
+  if (!isFiniteNumber(outcomeNoise) || outcomeNoise < 0) {
+    return {
+      error: createError(
+        "invalid_outcome_noise",
+        "outcome_noise must be a finite number >= 0",
+      ),
+    };
+  }
+
   const bias = rawScenario.bias ?? 0;
   if (!isFiniteNumber(bias)) {
     return {
@@ -305,6 +439,8 @@ function normalizeScenario(rawScenario, options = {}) {
       parameters,
       weights,
       uncertainty,
+      outcome_noise: outcomeNoise,
+      outcome_noise_source: outcomeNoiseSource,
       bias,
       threshold,
       parameterKeys,
@@ -312,8 +448,11 @@ function normalizeScenario(rawScenario, options = {}) {
   };
 }
 
-function runTrials(numSims, normalizedScenario) {
+function runTrials(numSims, normalizedScenario, options = {}) {
+  const includeSamples = options.includeSamples === true;
+  const random = createRandomSource(options);
   const scores = new Array(numSims);
+  const effectiveScores = new Array(numSims);
   const sampleSums = Object.fromEntries(
     normalizedScenario.parameterKeys.map((key) => [key, 0]),
   );
@@ -330,6 +469,7 @@ function runTrials(numSims, normalizedScenario) {
       const sample = randomNormal(
         normalizedScenario.parameters[key],
         normalizedScenario.uncertainty[key],
+        random,
       );
       const contribution = sample * normalizedScenario.weights[key];
       score += contribution;
@@ -338,7 +478,11 @@ function runTrials(numSims, normalizedScenario) {
     }
 
     scores[i] = score;
-    if (score >= normalizedScenario.threshold) {
+    const effectiveScore =
+      score + randomNormal(0, normalizedScenario.outcome_noise, random);
+    effectiveScores[i] = effectiveScore;
+
+    if (effectiveScore >= normalizedScenario.threshold) {
       successes += 1;
     }
   }
@@ -356,23 +500,57 @@ function runTrials(numSims, normalizedScenario) {
     };
   }
 
-  return {
+  const rawScoreDistribution = summarizeScores(scores);
+  const effectiveScoreDistribution = summarizeScores(effectiveScores);
+  const riskMetrics = summarizeRiskMetrics(
+    effectiveScores,
+    normalizedScenario.threshold,
+    successes,
+  );
+
+  const result = {
     simulation_meta: {
       simulations_run: numSims,
       model_version: MODEL_VERSION,
-      success_rule: "score >= threshold",
+      success_rule:
+        normalizedScenario.outcome_noise > 0
+          ? "score + outcome_noise_draw >= threshold"
+          : "score >= threshold",
+      calibration: {
+        outcome_noise: round(normalizedScenario.outcome_noise, 6),
+        outcome_noise_source: normalizedScenario.outcome_noise_source,
+      },
     },
     outcome_probability: round(probability),
     confidence_interval_95: {
       low: round(clamp(probability - margin, 0, 1)),
       high: round(clamp(probability + margin, 0, 1)),
     },
-    score_distribution: summarizeScores(scores),
+    score_distribution: rawScoreDistribution,
+    effective_score_distribution: effectiveScoreDistribution,
     parameter_contributions: parameterContributions,
+    risk_metrics: riskMetrics,
+    diagnostics: {
+      threshold: round(normalizedScenario.threshold, 6),
+      effective_score_stddev: effectiveScoreDistribution.stddev,
+      effective_margin_mean: round(
+        effectiveScoreDistribution.mean - normalizedScenario.threshold,
+      ),
+      saturation_risk: classifySaturationRisk(probability),
+    },
   };
+
+  if (includeSamples) {
+    result.samples = {
+      scores,
+      effective_scores: effectiveScores,
+    };
+  }
+
+  return result;
 }
 
-function runSimulation(numSims, scenario) {
+function runSimulation(numSims, scenario, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -383,7 +561,138 @@ function runSimulation(numSims, scenario) {
     return normalized.error;
   }
 
-  return runTrials(numSims, normalized.value);
+  return runTrials(numSims, normalized.value, options);
+}
+
+function runBatchProbability(numSims, payload, options = {}) {
+  const simCount = validateSimCount(numSims);
+  if (simCount.error) {
+    return simCount.error;
+  }
+
+  if (!isPlainObject(payload)) {
+    return createError("invalid_batch_request", "request body must be an object");
+  }
+
+  const allowedKeys = new Set(["scenarios"]);
+  const keyCheck = validateAllowedKeys(payload, allowedKeys, "invalid_batch_request");
+  if (keyCheck.error) {
+    return keyCheck.error;
+  }
+
+  if (!Array.isArray(payload.scenarios) || payload.scenarios.length === 0) {
+    return createError(
+      "invalid_batch_request",
+      "scenarios must be a non-empty array",
+    );
+  }
+
+  if (payload.scenarios.length > 100) {
+    return createError(
+      "invalid_batch_request",
+      "scenarios cannot contain more than 100 entries",
+    );
+  }
+
+  const scenarios = payload.scenarios.map((entry, index) => {
+    if (!isPlainObject(entry)) {
+      return {
+        error: createError(
+          "invalid_batch_request",
+          `scenarios[${index}] must be an object`,
+        ),
+      };
+    }
+
+    const entryKeys = new Set([
+      "label",
+      "scenario",
+      "parameters",
+      "weights",
+      "uncertainty",
+      "outcome_noise",
+      "bias",
+      "threshold",
+    ]);
+    const entryKeyCheck = validateAllowedKeys(entry, entryKeys, "invalid_batch_request");
+    if (entryKeyCheck.error) {
+      return entryKeyCheck;
+    }
+
+    const scenarioValue = isPlainObject(entry.scenario)
+      ? entry.scenario
+      : Object.fromEntries(
+          Object.entries(entry).filter(([key]) => SCENARIO_KEYS.has(key)),
+        );
+
+    const normalized = normalizeScenario(scenarioValue);
+    if (normalized.error) {
+      return {
+        error: {
+          ...normalized.error,
+          details: {
+            ...(normalized.error.details ?? {}),
+            scenario_index: index,
+          },
+        },
+      };
+    }
+
+    return {
+      value: {
+        index,
+        label:
+          typeof entry.label === "string" && entry.label.trim() !== ""
+            ? entry.label.trim()
+            : `scenario_${index + 1}`,
+        scenario: normalized.value,
+      },
+    };
+  });
+
+  const firstError = scenarios.find((entry) => entry.error);
+  if (firstError) {
+    return firstError.error;
+  }
+
+  const results = scenarios.map((entry) => {
+    const result = runTrials(numSims, entry.value.scenario, {
+      seed: deriveSeed(options.seed, `batch:${entry.value.index}`),
+    });
+    return {
+      index: entry.value.index,
+      label: entry.value.label,
+      result,
+    };
+  });
+
+  const ranking = [...results]
+    .sort((left, right) => {
+      if (right.result.outcome_probability !== left.result.outcome_probability) {
+        return right.result.outcome_probability - left.result.outcome_probability;
+      }
+
+      return right.result.score_distribution.mean - left.result.score_distribution.mean;
+    })
+    .map((entry, rankIndex) => ({
+      rank: rankIndex + 1,
+      index: entry.index,
+      label: entry.label,
+      outcome_probability: entry.result.outcome_probability,
+      mean_score: entry.result.score_distribution.mean,
+      confidence_interval_95: entry.result.confidence_interval_95,
+    }));
+
+  return {
+    batch_meta: {
+      simulations_run: numSims,
+      model_version: MODEL_VERSION,
+      scenario_count: results.length,
+      ranked_by: ["outcome_probability", "mean_score"],
+    },
+    scenarios: results,
+    ranking,
+  };
 }
 
 function toScenarioPayload(payload, options = {}) {
@@ -427,7 +736,7 @@ function toScenarioPayload(payload, options = {}) {
 
   return { value: scenario };
 }
-function runCompare(numSims, payload) {
+function runCompare(numSims, payload, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -500,8 +809,16 @@ function runCompare(numSims, payload) {
     };
   }
 
-  const baseline = runTrials(numSims, baselineNormalized.value);
-  const candidate = runTrials(numSims, candidateNormalized.value);
+  const baselineDetailed = runTrials(numSims, baselineNormalized.value, {
+    includeSamples: true,
+    seed: deriveSeed(options.seed, "compare:baseline"),
+  });
+  const candidateDetailed = runTrials(numSims, candidateNormalized.value, {
+    includeSamples: true,
+    seed: deriveSeed(options.seed, "compare:candidate"),
+  });
+  const { samples: baselineSamples, ...baseline } = baselineDetailed;
+  const { samples: candidateSamples, ...candidate } = candidateDetailed;
 
   const baselineLabel =
     isPlainObject(labels) && typeof labels.baseline === "string"
@@ -515,6 +832,19 @@ function runCompare(numSims, payload) {
   const probabilityDelta = candidate.outcome_probability - baseline.outcome_probability;
   const meanScoreDelta =
     candidate.score_distribution.mean - baseline.score_distribution.mean;
+  const pairedScoreGaps = candidateSamples.effective_scores.map(
+    (candidateScore, index) => candidateScore - baselineSamples.effective_scores[index],
+  );
+  const probabilityCandidateOutperforms =
+    pairedScoreGaps.filter((gap) => gap > 0).length / pairedScoreGaps.length;
+  const expectedScoreGap =
+    pairedScoreGaps.reduce((acc, gap) => acc + gap, 0) / pairedScoreGaps.length;
+  const preferredScenario =
+    probabilityCandidateOutperforms > 0.525
+      ? candidateLabel
+      : probabilityCandidateOutperforms < 0.475
+        ? baselineLabel
+        : "tie";
 
   return {
     comparison_meta: {
@@ -533,10 +863,16 @@ function runCompare(numSims, payload) {
           ? null
           : round(probabilityDelta / baseline.outcome_probability),
     },
+    paired_score_distribution: summarizeScores(pairedScoreGaps),
+    decision_summary: {
+      preferred_scenario: preferredScenario,
+      probability_candidate_outperforms: round(probabilityCandidateOutperforms),
+      expected_score_gap: round(expectedScoreGap),
+    },
   };
 }
 
-function runSensitivity(numSims, payload) {
+function runSensitivity(numSims, payload, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -551,6 +887,7 @@ function runSensitivity(numSims, payload) {
     "parameters",
     "weights",
     "uncertainty",
+    "outcome_noise",
     "bias",
     "threshold",
     "parameter",
@@ -606,7 +943,9 @@ function runSensitivity(numSims, payload) {
   }
 
   const baseScenario = normalized.value;
-  const baseline = runTrials(numSims, baseScenario);
+  const baseline = runTrials(numSims, baseScenario, {
+    seed: deriveSeed(options.seed, "sensitivity:baseline"),
+  });
   const baseValue = baseScenario.parameters[parameter];
 
   const lowerValue = mode === "relative" ? baseValue * (1 - delta) : baseValue - delta;
@@ -628,14 +967,36 @@ function runSensitivity(numSims, payload) {
     },
   };
 
-  const lower = runTrials(numSims, lowerScenario);
-  const upper = runTrials(numSims, upperScenario);
+  const lower = runTrials(numSims, lowerScenario, {
+    seed: deriveSeed(options.seed, "sensitivity:low"),
+  });
+  const upper = runTrials(numSims, upperScenario, {
+    seed: deriveSeed(options.seed, "sensitivity:high"),
+  });
 
   const denominator = upperValue - lowerValue;
   const gradient =
     denominator === 0
       ? null
       : round((upper.outcome_probability - lower.outcome_probability) / denominator, 6);
+  const direction =
+    upper.outcome_probability - lower.outcome_probability > 0.005
+      ? "increasing"
+      : upper.outcome_probability - lower.outcome_probability < -0.005
+        ? "decreasing"
+        : "flat";
+  const midpointElasticity =
+    mode === "relative"
+    && baseline.outcome_probability > 0
+    && baseValue !== 0
+    && denominator !== 0
+      ? round(
+          ((upper.outcome_probability - lower.outcome_probability)
+            / baseline.outcome_probability)
+            / (denominator / Math.abs(baseValue)),
+          6,
+        )
+      : null;
 
   return {
     sensitivity_meta: {
@@ -657,13 +1018,21 @@ function runSensitivity(numSims, payload) {
     },
     sensitivity: {
       probability_gradient: gradient,
+      midpoint_elasticity: midpointElasticity,
+      direction,
       shift_low: round(lower.outcome_probability - baseline.outcome_probability),
       shift_high: round(upper.outcome_probability - baseline.outcome_probability),
+    },
+    response_curve: {
+      low_probability: lower.outcome_probability,
+      baseline_probability: baseline.outcome_probability,
+      high_probability: upper.outcome_probability,
+      span: round(upper.outcome_probability - lower.outcome_probability),
     },
   };
 }
 
-function runForecast(numSims, payload) {
+function runForecast(numSims, payload, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -678,6 +1047,7 @@ function runForecast(numSims, payload) {
     "parameters",
     "weights",
     "uncertainty",
+    "outcome_noise",
     "bias",
     "threshold",
     "periods",
@@ -779,13 +1149,17 @@ function runForecast(numSims, payload) {
       workingScenario.uncertainty[key] = scaled;
     }
 
-    const result = runTrials(numSims, workingScenario);
+    const result = runTrials(numSims, workingScenario, {
+      seed: deriveSeed(options.seed, `forecast:${period}`),
+    });
     timeline.push({
       period,
       parameters: parameterSnapshot,
       outcome_probability: result.outcome_probability,
       confidence_interval_95: result.confidence_interval_95,
       mean_score: result.score_distribution.mean,
+      effective_score_distribution: result.effective_score_distribution,
+      risk_metrics: result.risk_metrics,
     });
   }
 
@@ -808,7 +1182,7 @@ function runForecast(numSims, payload) {
     },
   };
 }
-function runComposed(numSims, payload) {
+function runComposed(numSims, payload, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -855,6 +1229,7 @@ function runComposed(numSims, payload) {
       "parameters",
       "weights",
       "uncertainty",
+      "outcome_noise",
       "bias",
       "threshold",
     ]);
@@ -911,7 +1286,9 @@ function runComposed(numSims, payload) {
 
   const totalWeight = normalizedComponents.reduce((acc, item) => acc + item.weight, 0);
   const components = normalizedComponents.map((component) => {
-    const result = runTrials(numSims, component.scenario);
+    const result = runTrials(numSims, component.scenario, {
+      seed: deriveSeed(options.seed, `composed:${component.label}`),
+    });
     return {
       label: component.label,
       weight: round(component.weight, 6),
@@ -1023,11 +1400,15 @@ function buildOptimizationBounds(parameters, rawBounds) {
 }
 
 function drawRandomCandidate(bounds) {
+  return drawRandomCandidateWithRandom(bounds, Math.random);
+}
+
+function drawRandomCandidateWithRandom(bounds, random) {
   const candidate = {};
   for (const key of Object.keys(bounds)) {
     const min = bounds[key].min;
     const max = bounds[key].max;
-    candidate[key] = min + Math.random() * (max - min);
+    candidate[key] = min + random() * (max - min);
   }
 
   return candidate;
@@ -1041,7 +1422,7 @@ function objectiveValue(objective, result) {
   return result.outcome_probability;
 }
 
-function runOptimize(numSims, payload) {
+function runOptimize(numSims, payload, options = {}) {
   const simCount = validateSimCount(numSims);
   if (simCount.error) {
     return simCount.error;
@@ -1056,6 +1437,7 @@ function runOptimize(numSims, payload) {
     "parameters",
     "weights",
     "uncertainty",
+    "outcome_noise",
     "bias",
     "threshold",
     "bounds",
@@ -1104,18 +1486,25 @@ function runOptimize(numSims, payload) {
   }
 
   const bounds = boundsResult.value;
-  const baseResult = runTrials(numSims, normalized.value);
+  const optimizationRandom = createRandomSource({
+    seed: deriveSeed(options.seed, "optimize:candidates"),
+  });
+  const baseResult = runTrials(numSims, normalized.value, {
+    seed: deriveSeed(options.seed, "optimize:baseline"),
+  });
   let bestParameters = { ...normalized.value.parameters };
   let bestResult = baseResult;
   let bestObjectiveValue = objectiveValue(objective, baseResult);
 
   for (let i = 0; i < iterations; i += 1) {
-    const candidateParameters = drawRandomCandidate(bounds);
+    const candidateParameters = drawRandomCandidateWithRandom(bounds, optimizationRandom);
     const candidateScenario = {
       ...normalized.value,
       parameters: candidateParameters,
     };
-    const candidateResult = runTrials(numSims, candidateScenario);
+    const candidateResult = runTrials(numSims, candidateScenario, {
+      seed: deriveSeed(options.seed, `optimize:candidate:${i}`),
+    });
     const score = objectiveValue(objective, candidateResult);
     if (score > bestObjectiveValue) {
       bestObjectiveValue = score;
@@ -1165,6 +1554,7 @@ function runOptimize(numSims, payload) {
 module.exports = {
   MODEL_VERSION,
   normalizeScenario,
+  runBatchProbability,
   runSimulation,
   runCompare,
   runSensitivity,

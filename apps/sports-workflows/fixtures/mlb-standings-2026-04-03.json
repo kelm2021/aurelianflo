@@ -1,0 +1,26 @@
+{
+  "as_of_date": "2026-04-03",
+  "source": "MLB.com regular season standings snapshot",
+  "teams": [
+    { "name": "New York Yankees", "abbr": "NYY", "conference": "AL", "seed": 1, "wins": 5, "losses": 1, "win_pct": 0.833, "point_diff": 2.33, "last_10": "5-1" },
+    { "name": "Detroit Tigers", "abbr": "DET", "conference": "AL", "seed": 2, "wins": 5, "losses": 1, "win_pct": 0.833, "point_diff": 2.17, "last_10": "5-1" },
+    { "name": "Baltimore Orioles", "abbr": "BAL", "conference": "AL", "seed": 3, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 1.5, "last_10": "4-2" },
+    { "name": "Toronto Blue Jays", "abbr": "TOR", "conference": "AL", "seed": 4, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 1.17, "last_10": "4-2" },
+    { "name": "Houston Astros", "abbr": "HOU", "conference": "AL", "seed": 5, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 0.83, "last_10": "4-2" },
+    { "name": "Seattle Mariners", "abbr": "SEA", "conference": "AL", "seed": 6, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 0.67, "last_10": "4-2" },
+    { "name": "Texas Rangers", "abbr": "TEX", "conference": "AL", "seed": 7, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0.33, "last_10": "3-3" },
+    { "name": "Kansas City Royals", "abbr": "KC", "conference": "AL", "seed": 8, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0.17, "last_10": "3-3" },
+    { "name": "Cleveland Guardians", "abbr": "CLE", "conference": "AL", "seed": 9, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0, "last_10": "3-3" },
+    { "name": "Boston Red Sox", "abbr": "BOS", "conference": "AL", "seed": 10, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": -0.17, "last_10": "3-3" },
+    { "name": "Los Angeles Dodgers", "abbr": "LAD", "conference": "NL", "seed": 1, "wins": 6, "losses": 0, "win_pct": 1, "point_diff": 2.83, "last_10": "6-0" },
+    { "name": "San Diego Padres", "abbr": "SD", "conference": "NL", "seed": 2, "wins": 5, "losses": 1, "win_pct": 0.833, "point_diff": 2.5, "last_10": "5-1" },
+    { "name": "Chicago Cubs", "abbr": "CHC", "conference": "NL", "seed": 3, "wins": 5, "losses": 1, "win_pct": 0.833, "point_diff": 1.83, "last_10": "5-1" },
+    { "name": "Philadelphia Phillies", "abbr": "PHI", "conference": "NL", "seed": 4, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 1.33, "last_10": "4-2" },
+    { "name": "San Francisco Giants", "abbr": "SF", "conference": "NL", "seed": 5, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 1, "last_10": "4-2" },
+    { "name": "Atlanta Braves", "abbr": "ATL", "conference": "NL", "seed": 6, "wins": 4, "losses": 2, "win_pct": 0.667, "point_diff": 0.83, "last_10": "4-2" },
+    { "name": "New York Mets", "abbr": "NYM", "conference": "NL", "seed": 7, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0.33, "last_10": "3-3" },
+    { "name": "Milwaukee Brewers", "abbr": "MIL", "conference": "NL", "seed": 8, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0.17, "last_10": "3-3" },
+    { "name": "Arizona Diamondbacks", "abbr": "AZ", "conference": "NL", "seed": 9, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": 0, "last_10": "3-3" },
+    { "name": "St. Louis Cardinals", "abbr": "STL", "conference": "NL", "seed": 10, "wins": 3, "losses": 3, "win_pct": 0.5, "point_diff": -0.17, "last_10": "3-3" }
+  ]
+}
