@@ -7,7 +7,6 @@ const {
 } = require("@x402/extensions/bazaar");
 const restrictedPartySellerConfig = require("./apps/restricted-party-screen/seller.config.json");
 const restrictedPartyPrimaryHandler = require("./apps/restricted-party-screen/handlers/primary");
-const restrictedPartyBatchHandler = require("./apps/restricted-party-screen/handlers/batch");
 const vendorEntityBriefSellerConfig = require("./apps/vendor-entity-brief/seller.config.json");
 const vendorEntityBriefPrimaryHandler = require("./apps/vendor-entity-brief/handlers/primary");
 const genericSimulatorSellerConfig = require("./apps/generic-parameter-simulator/seller.config.json");
@@ -48,6 +47,10 @@ const {
 const {
   createMercTrustEnforcementFromEnv,
 } = require("./lib/merc-trust-enforcement");
+const {
+  createAurelianFloMcpExpressBridge,
+  createAurelianFloMcpServerCardHandler,
+} = require("./lib/aurelianflo-mcp-bridge");
 const WELL_KNOWN_X402_AURELIAN = require("./well-known-x402-aurelian.json");
 
 const PAY_TO = "0x348Df429BD49A7506128c74CE1124A81B4B7dC9d";
@@ -65,9 +68,9 @@ const WRAPPED_PRODUCT_URL = String(
 )
   .trim()
   .replace(/\/+$/, "");
-const DEFAULT_ORIGIN_TITLE = "AurelianFlo APIs";
+const DEFAULT_ORIGIN_TITLE = "AurelianFlo Compliance, Simulation, and Report Generation API";
 const DEFAULT_ORIGIN_DESCRIPTION =
-  "Curated, high-signal endpoints with x402-native access.";
+  "AurelianFlo is an x402-paid API for OFAC wallet screening, vendor due diligence, sanctions and restricted-party checks, Monte Carlo forecasting, cash runway simulation, pricing and scenario analysis, and premium PDF, DOCX, and XLSX report generation. Use it when you need compliance checks, decision-support analysis, or client-ready documents instead of raw JSON.";
 const DEFAULT_FAVICON_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/2kQAAAAASUVORK5CYII=";
 const DEFAULT_FAVICON_PNG = Buffer.from(DEFAULT_FAVICON_PNG_BASE64, "base64");
@@ -350,8 +353,8 @@ const SIM_LANDING_COMPOSABILITY = {
       name: "Vendor Risk Optimization",
       steps: [
         {
-          call: "GET /api/ofac-sanctions-screening/{name}",
-          extract: "Match count and risk score",
+          call: "GET /api/ofac-wallet-screen/{address}",
+          extract: "Wallet sanctions hit or clear status",
         },
         {
           call: "GET /api/sec/filings/{ticker}",
@@ -427,7 +430,7 @@ const SIM_LANDING_COMPOSABILITY = {
     {
       category: "Compliance",
       endpoints: [
-        "/api/ofac-sanctions-screening/*",
+        "/api/ofac-wallet-screen/:address",
         "/api/sanctions/*",
         "/api/vendor-entity-brief",
         "/api/courts/cases",
@@ -827,6 +830,38 @@ const LEGACY_DOCX_INPUT_SCHEMA = {
   additionalProperties: true,
 };
 
+const PREMIUM_SIMPLE_DOCX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    markdown: { type: "string" },
+    html: { type: "string" },
+    metadata: FLEXIBLE_OBJECT_SCHEMA,
+    sections: LEGACY_DOCX_INPUT_SCHEMA.properties.sections,
+  },
+  anyOf: [
+    { required: ["title", "sections"] },
+    { required: ["markdown"] },
+    { required: ["html"] },
+  ],
+  additionalProperties: true,
+};
+
+const MAX_FIDELITY_DOCX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    metadata: FLEXIBLE_OBJECT_SCHEMA,
+    variables: FLEXIBLE_OBJECT_SCHEMA,
+    data: FLEXIBLE_OBJECT_SCHEMA,
+    sections: LEGACY_DOCX_INPUT_SCHEMA.properties.sections,
+  },
+  required: ["template"],
+  additionalProperties: true,
+};
+
 const LEGACY_XLSX_INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -864,10 +899,49 @@ const LEGACY_XLSX_INPUT_SCHEMA = {
   additionalProperties: true,
 };
 
+const PREMIUM_SIMPLE_XLSX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    markdown: { type: "string" },
+    html: { type: "string" },
+    metadata: FLEXIBLE_OBJECT_SCHEMA,
+    sheets: LEGACY_XLSX_INPUT_SCHEMA.properties.sheets,
+    tables: {
+      type: "array",
+      items: REPORT_TABLE_SCHEMA,
+    },
+  },
+  anyOf: [
+    { required: ["title", "sheets"] },
+    { required: ["html"] },
+    { required: ["markdown"] },
+    { required: ["tables"] },
+  ],
+  additionalProperties: true,
+};
+
+const MAX_FIDELITY_XLSX_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    template: { type: "string" },
+    metadata: FLEXIBLE_OBJECT_SCHEMA,
+    variables: FLEXIBLE_OBJECT_SCHEMA,
+    data: FLEXIBLE_OBJECT_SCHEMA,
+    sheets: LEGACY_XLSX_INPUT_SCHEMA.properties.sheets,
+  },
+  required: ["template"],
+  additionalProperties: true,
+};
+
 const LEGACY_PDF_INPUT_SCHEMA = {
   type: "object",
   properties: {
     title: { type: "string" },
+    format: { type: "string", enum: ["markdown", "html"] },
+    content: { type: "string" },
     markdown: { type: "string" },
     html: { type: "string" },
     note: { type: "string" },
@@ -881,6 +955,64 @@ const LEGACY_PDF_INPUT_SCHEMA = {
     },
     data: FLEXIBLE_OBJECT_SCHEMA,
   },
+  additionalProperties: true,
+};
+
+const MAX_FIDELITY_PDF_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    html: { type: "string" },
+    css: { type: "string" },
+    headerHtml: { type: "string" },
+    footerHtml: { type: "string" },
+    printBackground: { type: "boolean" },
+    page: {
+      type: "object",
+      properties: {
+        format: { type: "string" },
+        margin: FLEXIBLE_OBJECT_SCHEMA,
+        landscape: { type: "boolean" },
+      },
+      additionalProperties: true,
+    },
+  },
+  required: ["html"],
+  additionalProperties: true,
+};
+
+const LEGACY_REPORT_INPUT_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    subtitle: { type: "string" },
+    summary: { type: "string" },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          heading: { type: "string" },
+          title: { type: "string" },
+          body: { type: "string" },
+          text: { type: "string" },
+          bullets: {
+            type: "array",
+            items: { type: "string" },
+          },
+          table: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: JSON_PRIMITIVE_SCHEMA,
+            },
+          },
+        },
+        additionalProperties: true,
+      },
+    },
+  },
+  required: ["title"],
   additionalProperties: true,
 };
 
@@ -925,7 +1057,7 @@ const DOCUMENT_ARTIFACT_RESPONSE_SCHEMA = {
 
 const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
   "POST /api/tools/report/generate": {
-    description: "Generate a styled report PDF from the shared report model or a generic PDF payload.",
+    description: "Generate a premium styled report PDF from the shared report model or a legacy report payload with title, summary, sections, and headline metrics.",
     inputExample: {
       report_meta: { report_type: "ops-brief", title: "Weekly Ops Brief", author: "AurelianFlo" },
       executive_summary: [
@@ -944,12 +1076,12 @@ const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
       },
     },
     inputSchema: {
-      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_PDF_INPUT_SCHEMA],
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_REPORT_INPUT_SCHEMA],
     },
     outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
   },
   "POST /api/tools/docx/generate": {
-    description: "Generate a DOCX file from the shared report model or a structured DOCX document payload.",
+    description: "Generate a premium direct DOCX from structured sections, markdown, or HTML content, or from the shared report model.",
     inputExample: {
       report_meta: { report_type: "partner-brief", title: "Partner Brief", author: "AurelianFlo" },
       executive_summary: ["Partner scope is defined and ready for review."],
@@ -965,12 +1097,12 @@ const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
       },
     },
     inputSchema: {
-      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_DOCX_INPUT_SCHEMA],
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, PREMIUM_SIMPLE_DOCX_INPUT_SCHEMA],
     },
     outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
   },
   "POST /api/tools/xlsx/generate": {
-    description: "Generate an XLSX workbook from the shared report model or a structured workbook payload.",
+    description: "Generate a premium direct XLSX workbook from structured sheets, markdown tables, HTML tables, or the shared report model.",
     inputExample: {
       report_meta: { report_type: "data-workbook", title: "Weekly Ops Workbook", author: "AurelianFlo" },
       executive_summary: ["Workbook rows are generated from the shared report model."],
@@ -982,32 +1114,156 @@ const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
       },
     },
     inputSchema: {
-      oneOf: [SHARED_REPORT_INPUT_SCHEMA, LEGACY_XLSX_INPUT_SCHEMA],
+      oneOf: [SHARED_REPORT_INPUT_SCHEMA, PREMIUM_SIMPLE_XLSX_INPUT_SCHEMA],
     },
     outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
   },
   "POST /api/tools/pdf/generate": {
-    description: "Generate a PDF from markdown, HTML, structured JSON, or other generic PDF input payloads.",
+    description:
+      "Generate a PDF from markdown, HTML, or structured report content for polished exports, client deliverables, internal memos, and report distribution.",
     inputExample: {
       title: "Q2 Planning Memo",
-      markdown: "# Q2 Planning Memo\n\n- Launch core routes\n- Verify monitoring\n",
+      format: "markdown",
+      content: "# Q2 Planning Memo\n\n- Launch core routes\n- Verify monitoring\n",
     },
     inputSchema: LEGACY_PDF_INPUT_SCHEMA,
     outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
   },
 };
+
+const GENERATED_DOCUMENT_ROUTE_ALIASES = [
+  {
+    sourceKey: "POST /api/tools/report/generate",
+    aliasKey: "POST /api/tools/report/pdf/generate",
+    aliasPath: "/api/tools/report/pdf/generate",
+    override: {
+      price: "0.2",
+      description: "Generate a premium styled PDF report from the shared report model or a legacy report payload.",
+      inputExample: GENERATED_DOCUMENT_ROUTE_OVERRIDES["POST /api/tools/report/generate"].inputExample,
+      inputSchema: GENERATED_DOCUMENT_ROUTE_OVERRIDES["POST /api/tools/report/generate"].inputSchema,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "pdf", "report", "premium"],
+    },
+  },
+  {
+    sourceKey: "POST /api/tools/docx/generate",
+    aliasKey: "POST /api/tools/report/docx/generate",
+    aliasPath: "/api/tools/report/docx/generate",
+    override: {
+      price: "0.16",
+      description: "Generate a premium report DOCX from the shared report model with report-aware structure and styling.",
+      inputExample: {
+        report_meta: { report_type: "board-update", title: "Board Update", author: "AurelianFlo" },
+        executive_summary: ["Highlights are ready for review."],
+        headline_metrics: [{ label: "Revenue", value: "$42k" }],
+        tables: {
+          pipeline: {
+            columns: ["stage", "status"],
+            rows: [{ stage: "Draft", status: "complete" }],
+          },
+        },
+      },
+      inputSchema: SHARED_REPORT_INPUT_SCHEMA,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "docx", "report", "premium"],
+    },
+  },
+  {
+    sourceKey: "POST /api/tools/xlsx/generate",
+    aliasKey: "POST /api/tools/report/xlsx/generate",
+    aliasPath: "/api/tools/report/xlsx/generate",
+    override: {
+      price: "0.16",
+      description: "Generate a premium report XLSX workbook from the shared report model with workbook-ready tabs and tables.",
+      inputExample: {
+        report_meta: { report_type: "ops-workbook", title: "Ops Workbook", author: "AurelianFlo" },
+        executive_summary: ["Workbook rows are derived from the shared report model."],
+        tables: {
+          metrics: {
+            columns: ["metric", "value"],
+            rows: [{ metric: "availability", value: "99.9%" }],
+          },
+        },
+      },
+      inputSchema: SHARED_REPORT_INPUT_SCHEMA,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "xlsx", "report", "premium"],
+    },
+  },
+  {
+    sourceKey: "POST /api/tools/pdf/generate",
+    aliasKey: "POST /api/tools/pdf/render-html",
+    aliasPath: "/api/tools/pdf/render-html",
+    override: {
+      price: "0.18",
+      description: "Generate a max-fidelity PDF from HTML using the strongest available render engine for layout, CSS, and tables.",
+      inputExample: {
+        title: "Branded HTML Brief",
+        html: "<html><body><h1>Quarterly Brief</h1><table><tr><th>Metric</th><th>Value</th></tr><tr><td>ARR</td><td>$42k</td></tr></table></body></html>",
+        css: "table{border-collapse:collapse}th,td{border:1px solid #333;padding:6px}",
+      },
+      inputSchema: MAX_FIDELITY_PDF_INPUT_SCHEMA,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "pdf", "html", "premium", "max-fidelity"],
+    },
+  },
+  {
+    sourceKey: "POST /api/tools/docx/generate",
+    aliasKey: "POST /api/tools/docx/render-template",
+    aliasPath: "/api/tools/docx/render-template",
+    override: {
+      price: "0.18",
+      description: "Generate a max-fidelity DOCX from a named template with structured variables and sections.",
+      inputExample: {
+        title: "Mutual NDA",
+        template: "nda",
+        variables: {
+          disclosingParty: "AurelianFlo",
+          receivingParty: "Acme Co",
+        },
+      },
+      inputSchema: MAX_FIDELITY_DOCX_INPUT_SCHEMA,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "docx", "template", "premium", "max-fidelity"],
+    },
+  },
+  {
+    sourceKey: "POST /api/tools/xlsx/generate",
+    aliasKey: "POST /api/tools/xlsx/render-template",
+    aliasPath: "/api/tools/xlsx/render-template",
+    override: {
+      price: "0.18",
+      description: "Generate a max-fidelity XLSX workbook from a named template with structured variables and workbook data.",
+      inputExample: {
+        title: "Revenue Tracker",
+        template: "tracker",
+        data: {
+          rows: [
+            { month: "Jan", revenue: 12000 },
+            { month: "Feb", revenue: 13500 },
+          ],
+        },
+      },
+      inputSchema: MAX_FIDELITY_XLSX_INPUT_SCHEMA,
+      outputSchema: DOCUMENT_ARTIFACT_RESPONSE_SCHEMA,
+      tags: ["documents", "xlsx", "template", "premium", "max-fidelity"],
+    },
+  },
+];
 const PUBLIC_CORE_DISCOVERY_ROUTE_KEYS = new Set([
-  "GET /api/ofac-sanctions-screening/*",
-  "GET /api/vendor-onboarding/restricted-party-batch",
-  "GET /api/restricted-party/screen/*",
+  "GET /api/ofac-wallet-screen/:address",
+  "POST /api/workflows/compliance/wallet-sanctions-report",
   "GET /api/vendor-entity-brief",
   "POST /api/workflows/finance/cash-runway-forecast",
+  "POST /api/workflows/finance/startup-runway-forecast",
   "POST /api/workflows/finance/pricing-plan-compare",
+  "POST /api/workflows/finance/pricing-sensitivity-report",
   "POST /api/workflows/sports/nba/championship-forecast",
   "POST /api/workflows/sports/nfl/championship-forecast",
   "POST /api/workflows/sports/mlb/championship-forecast",
   "POST /api/workflows/sports/nhl/championship-forecast",
   "POST /api/workflows/vendor/risk-assessment",
+  "POST /api/workflows/vendor/due-diligence-report",
   "POST /api/sim/probability",
   "POST /api/sim/batch-probability",
   "POST /api/sim/compare",
@@ -1017,10 +1273,61 @@ const PUBLIC_CORE_DISCOVERY_ROUTE_KEYS = new Set([
   "POST /api/sim/optimize",
   "POST /api/sim/report",
   "POST /api/tools/report/generate",
+  "POST /api/tools/report/pdf/generate",
+  "POST /api/tools/report/docx/generate",
+  "POST /api/tools/report/xlsx/generate",
   "POST /api/tools/docx/generate",
   "POST /api/tools/xlsx/generate",
   "POST /api/tools/pdf/generate",
+  "POST /api/tools/pdf/render-html",
+  "POST /api/tools/docx/render-template",
+  "POST /api/tools/xlsx/render-template",
 ]);
+const FLAGSHIP_ROUTE_ORDER = [
+  "GET /api/ofac-wallet-screen/:address",
+  "POST /api/sim/report",
+  "POST /api/tools/report/pdf/generate",
+  "POST /api/tools/report/docx/generate",
+];
+const FLAGSHIP_ROUTE_KEYS = new Set(FLAGSHIP_ROUTE_ORDER);
+const FLAGSHIP_ROUTE_EDITORIAL = {
+  "GET /api/ofac-wallet-screen/:address": {
+    discipline: "Compliance",
+    sequence: "01",
+    title: "OFAC wallet screening",
+    summary:
+      "Screen a wallet address before funds move. This is the fastest path to an allow, pause, or block decision in an onchain workflow.",
+    proof:
+      "Returns exact hit or clear status, sanctioned entity metadata, source freshness, and a structured report payload ready for PDF or DOCX rendering.",
+  },
+  "POST /api/sim/report": {
+    discipline: "Decision Analysis",
+    sequence: "02",
+    title: "Monte Carlo decision report",
+    summary:
+      "Turn any supported simulation workflow into an analyst-ready report with executive summary, headline metrics, and workbook-ready tables.",
+    proof:
+      "Best when the decision depends on scenarios, uncertainty, or tradeoffs instead of a deterministic compliance result.",
+  },
+  "POST /api/tools/report/pdf/generate": {
+    discipline: "Documents",
+    sequence: "03A",
+    title: "Report PDF generation",
+    summary:
+      "Render the wallet-screening report payload into a premium PDF artifact for circulation, approvals, and audit handoff.",
+    proof:
+      "Best for final distribution when the report needs a fixed layout and a clean presentation layer.",
+  },
+  "POST /api/tools/report/docx/generate": {
+    discipline: "Documents",
+    sequence: "03B",
+    title: "Report DOCX generation",
+    summary:
+      "Render the same wallet-screening report payload into a Word-native deliverable for editing, markup, and client-side revision.",
+    proof:
+      "Best when the report needs editing, markup, or revision in a standard document workflow.",
+  },
+};
 const WORKFLOW_COMPATIBILITY_ALIASES = [
   {
     seller: "sports-workflows",
@@ -1048,11 +1355,136 @@ const WORKFLOW_COMPATIBILITY_ALIASES = [
     aliasPath: "/api/workflows/vendor/risk-forecast",
   },
   {
+    seller: "vendor-workflows",
+    sourceKey: "POST /api/workflows/vendor/risk-assessment",
+    aliasPath: "/api/workflows/vendor/due-diligence-report",
+    canonicalPath: "/api/workflows/vendor/due-diligence-report",
+    description:
+      "Run a vendor due diligence workflow that combines entity matching, registration review, sanctions screening, and decision-ready reporting for supplier onboarding.",
+    tags: ["vendor", "due-diligence", "supplier-onboarding", "kyb", "compliance", "workflow"],
+  },
+  {
     seller: "finance-workflows",
     sourceKey: "POST /api/workflows/finance/pricing-plan-compare",
     aliasPath: "/api/workflows/finance/pricing-scenario-forecast",
   },
+  {
+    seller: "finance-workflows",
+    sourceKey: "POST /api/workflows/finance/cash-runway-forecast",
+    aliasPath: "/api/workflows/finance/startup-runway-forecast",
+    canonicalPath: "/api/workflows/finance/startup-runway-forecast",
+    description:
+      "Run a startup runway forecast under uncertain revenue and burn assumptions and return a founder- and investor-ready decision payload with risk bands and runway estimates.",
+    tags: ["finance", "startup", "runway", "forecast", "founder", "investor", "workflow"],
+  },
+  {
+    seller: "finance-workflows",
+    sourceKey: "POST /api/workflows/finance/pricing-plan-compare",
+    aliasPath: "/api/workflows/finance/pricing-sensitivity-report",
+    canonicalPath: "/api/workflows/finance/pricing-sensitivity-report",
+    description:
+      "Run pricing sensitivity analysis across multiple plans and assumptions and return a decision-ready report on expected profit, downside risk, and plan ranking.",
+    tags: ["finance", "pricing", "sensitivity", "plan-ranking", "profitability", "workflow"],
+  },
 ];
+
+const ROUTE_DISCOVERY_OVERRIDES = {
+  "GET /api/ofac-wallet-screen/:address": {
+    description:
+      "Screen a crypto wallet for OFAC sanctions exposure and return a wallet compliance result, including hit or clear status, sanctioned entity details, covered assets, sanctions programs, and a manual-review flag for AML, treasury, and onchain payment controls.",
+    tags: ["compliance", "ofac", "wallet-screening", "aml", "treasury", "onchain", "sanctions"],
+  },
+  "GET /api/vendor-entity-brief": {
+    description:
+      "Generate a vendor due diligence brief for supplier onboarding, procurement review, KYB-style entity checks, and restricted-party screening, with legal entity match candidates, jurisdiction and registration details, OFAC screening signals, and a proceed-or-pause recommendation.",
+    tags: ["vendor-due-diligence", "supplier-onboarding", "kyb", "ofac", "restricted-party", "compliance"],
+  },
+  "POST /api/sim/probability": {
+    description:
+      "Run a Monte Carlo probability simulation for a single scenario and estimate the likelihood of an outcome under uncertain inputs such as conversion, churn, pricing, cost, or demand assumptions.",
+    tags: ["monte-carlo", "probability", "forecasting", "decision-analysis", "scenario-modeling"],
+  },
+  "POST /api/sim/batch-probability": {
+    description:
+      "Run Monte Carlo simulations across multiple scenarios in one call and return ranked probabilities for decision-making, option screening, and scenario comparison.",
+    tags: ["monte-carlo", "batch-simulation", "scenario-ranking", "decision-analysis"],
+  },
+  "POST /api/sim/compare": {
+    description:
+      "Compare a baseline and proposed scenario with Monte Carlo simulation and return uplift, downside, and decision-oriented guidance for pricing, growth, product, or operating-plan changes.",
+    tags: ["monte-carlo", "scenario-compare", "pricing", "growth", "decision-analysis"],
+  },
+  "POST /api/sim/sensitivity": {
+    description:
+      "Measure which input variables matter most in a Monte Carlo model by perturbing a selected parameter and reporting outcome sensitivity, response curves, and decision impact.",
+    tags: ["monte-carlo", "sensitivity-analysis", "decision-impact", "response-curves"],
+  },
+  "POST /api/sim/forecast": {
+    description:
+      "Generate a probabilistic forecast across future periods under uncertainty, useful for runway planning, growth projections, demand forecasts, revenue outlooks, and risk-adjusted planning.",
+    tags: ["monte-carlo", "forecast", "runway-planning", "revenue-forecast", "growth-projections"],
+  },
+  "POST /api/sim/composed": {
+    description:
+      "Blend multiple weighted scenarios into a single Monte Carlo outcome model and return component-level traces for portfolio, plan-mix, or strategy-combination analysis.",
+    tags: ["monte-carlo", "scenario-composition", "portfolio-analysis", "strategy-analysis"],
+  },
+  "POST /api/sim/optimize": {
+    description:
+      "Search bounded parameter ranges to find the scenario that maximizes a target objective, useful for pricing optimization, budget allocation, or decision tuning under uncertainty.",
+    tags: ["monte-carlo", "optimization", "pricing-optimization", "budget-allocation", "decision-tuning"],
+  },
+  "POST /api/sim/report": {
+    description:
+      "Generate a structured Monte Carlo decision report with executive summary, headline metrics, ranked scenarios, and workbook-ready tables for finance, strategy, or operations review.",
+    tags: ["monte-carlo", "decision-report", "finance", "strategy", "operations", "reporting"],
+  },
+  "POST /api/workflows/vendor/risk-assessment": {
+    description:
+      "Assess vendor onboarding risk for one vendor or a vendor batch and return a report-ready payload for procurement, compliance, finance, and cross-border payout review.",
+    tags: ["vendor-risk", "procurement", "compliance", "finance", "cross-border", "workflow"],
+  },
+  "POST /api/workflows/finance/cash-runway-forecast": {
+    description:
+      "Simulate startup cash runway under burn and revenue uncertainty to estimate when the company runs out of cash, downside risk bands, and likely runway under multiple assumptions.",
+    tags: ["cash-runway", "startup-finance", "forecast", "burn-rate", "revenue", "workflow"],
+  },
+  "POST /api/workflows/finance/pricing-plan-compare": {
+    description:
+      "Compare pricing plans under uncertainty and rank expected profitability, downside risk, and expected outcomes for pricing experiments, packaging changes, and monetization decisions.",
+    tags: ["pricing", "plan-compare", "profitability", "monetization", "workflow"],
+  },
+  "POST /api/tools/docx/generate": {
+    description:
+      "Generate a DOCX file from structured sections, markdown, HTML, or report payloads for client-ready memos, reports, proposals, and decision documents.",
+    tags: ["docx", "document-generation", "proposal", "memo", "reporting"],
+  },
+  "POST /api/tools/pdf/generate": {
+    description:
+      "Generate a PDF from markdown, HTML, or structured report content for polished exports, client deliverables, internal memos, and report distribution.",
+    tags: ["pdf", "document-generation", "client-deliverable", "reporting", "export"],
+  },
+  "POST /api/tools/xlsx/generate": {
+    description:
+      "Generate an XLSX workbook from structured sheets, markdown tables, HTML tables, or report payloads for workbook exports, analysis packs, and finance-ready handoffs.",
+    tags: ["xlsx", "workbook", "analysis-pack", "finance", "export"],
+  },
+  "POST /api/tools/report/pdf/generate": {
+    description:
+      "Generate a styled PDF report from a shared report model with executive summary, metrics, sections, and tables for client delivery or internal decision review.",
+    tags: ["pdf-report", "executive-summary", "decision-review", "client-delivery"],
+  },
+  "POST /api/tools/report/docx/generate": {
+    description:
+      "Generate a styled DOCX report from a shared report model for editable decision memos, diligence reports, and client-facing documents.",
+    tags: ["docx-report", "decision-memo", "diligence-report", "client-document"],
+  },
+  "POST /api/tools/report/xlsx/generate": {
+    description:
+      "Generate a report-oriented XLSX workbook from a shared report model with tabs and tables for analysis handoff, finance modeling, and workbook-ready exports.",
+    tags: ["xlsx-report", "finance-modeling", "analysis-handoff", "workbook-export"],
+  },
+};
 
 function inferSchemaFromExample(value) {
   if (Array.isArray(value)) {
@@ -1164,6 +1596,39 @@ function createGeneratedCatalogRouteConfig(payTo = PAY_TO, options = {}) {
     entries[routeKey] = createPricedRoute(routeOptions);
   }
 
+  const generatedRoutesByKey = new Map(generatedRoutes.map((route) => [String(route?.key || "").trim(), route]));
+  for (const alias of GENERATED_DOCUMENT_ROUTE_ALIASES) {
+    const sourceRoute = generatedRoutesByKey.get(alias.sourceKey);
+    if (!sourceRoute || existingRouteKeys.has(alias.aliasKey) || entries[alias.aliasKey]) {
+      continue;
+    }
+
+    const method = String(sourceRoute?.method || alias.aliasKey.split(" ")[0] || "POST").toUpperCase();
+    const inputExample = alias.override?.inputExample ?? normalizeGeneratedInputExample(sourceRoute);
+    const routeOptions = {
+      price: alias.override?.price || sourceRoute?.price || "0.01",
+      description: alias.override?.description || sourceRoute?.description || `${alias.aliasKey} generated endpoint`,
+      payTo,
+      resourcePath: alias.aliasPath,
+      category: alias.override?.category || sourceRoute?.category,
+      tags: Array.isArray(alias.override?.tags)
+        ? alias.override.tags
+        : Array.isArray(sourceRoute?.tags)
+          ? sourceRoute.tags
+          : [],
+      bodyType: alias.override?.bodyType || sourceRoute?.bodyType || (method === "GET" ? undefined : "json"),
+      outputExample: alias.override?.outputExample || sourceRoute?.outputExample,
+      outputSchema: alias.override?.outputSchema,
+    };
+
+    if (method !== "GET" && inputExample !== null && inputExample !== undefined) {
+      routeOptions.inputExample = inputExample;
+      routeOptions.inputSchema = alias.override?.inputSchema || inferSchemaFromExample(inputExample);
+    }
+
+    entries[alias.aliasKey] = createPricedRoute(routeOptions);
+  }
+
   return entries;
 }
 
@@ -1252,7 +1717,9 @@ function getBundledSellerRoutes() {
       routePath: alias.aliasPath,
       expressPath: alias.aliasPath,
       resourcePath: alias.aliasPath,
-      canonicalPath: sourceRoute.canonicalPath || sourceRoute.routePath || alias.aliasPath,
+      canonicalPath: alias.canonicalPath || sourceRoute.canonicalPath || sourceRoute.routePath || alias.aliasPath,
+      description: alias.description || sourceRoute.description,
+      tags: Array.isArray(alias.tags) ? alias.tags : sourceRoute.tags,
       compatibilityAlias: true,
     }];
   });
@@ -1260,12 +1727,30 @@ function getBundledSellerRoutes() {
   return [...bundledRoutes, ...compatibilityAliases];
 }
 
+function getPaymentRouteKey(route) {
+  return route?.paymentRouteKey || route?.key;
+}
+
+function getDisplayRouteKey(routeKey, config) {
+  return config?.displayRouteKey || routeKey;
+}
+
+function getDisplayRoutePath(routeKey, config) {
+  if (config?.displayPath) {
+    return config.displayPath;
+  }
+
+  const [, routePath = "/"] = String(getDisplayRouteKey(routeKey, config) || "").split(" ");
+  return routePath;
+}
+
 function createBundledSellerRouteConfig() {
   const entries = {};
 
   for (const route of getBundledSellerRoutes()) {
     const canonicalResourcePath = route?.canonicalPath || route?.resourcePath;
-    if (!route?.key || !canonicalResourcePath) {
+    const paymentRouteKey = getPaymentRouteKey(route);
+    if (!paymentRouteKey || !canonicalResourcePath) {
       continue;
     }
 
@@ -1274,7 +1759,7 @@ function createBundledSellerRouteConfig() {
         ? { body: route.inputExample }
         : route.inputExample;
 
-    entries[route.key] = createPricedRoute({
+    const pricedRoute = createPricedRoute({
       price: route.price,
       description: route.description,
       payTo: route.payTo || PAY_TO,
@@ -1289,6 +1774,13 @@ function createBundledSellerRouteConfig() {
       outputExample: route.outputExample,
       outputSchema: route.outputSchema,
     });
+
+    if (paymentRouteKey !== route.key) {
+      pricedRoute.displayRouteKey = route.key;
+      pricedRoute.displayPath = route.routePath;
+    }
+
+    entries[paymentRouteKey] = pricedRoute;
   }
 
   return entries;
@@ -2833,7 +3325,27 @@ function createRouteConfig(payTo = PAY_TO) {
   };
 }
 
-const routeConfig = createRouteConfig();
+function applyRouteDiscoveryOverrides(routes = {}) {
+  const entries = Object.entries(routes).map(([routeKey, config]) => {
+    const override = ROUTE_DISCOVERY_OVERRIDES[routeKey];
+    if (!override) {
+      return [routeKey, config];
+    }
+
+    return [
+      routeKey,
+      {
+        ...config,
+        ...(override.description ? { description: override.description } : {}),
+        ...(Array.isArray(override.tags) ? { tags: override.tags } : {}),
+      },
+    ];
+  });
+
+  return Object.fromEntries(entries);
+}
+
+const routeConfig = applyRouteDiscoveryOverrides(createRouteConfig());
 
 function getPrimaryPaymentOption(config) {
   if (!config) {
@@ -2946,10 +3458,11 @@ function getExamplePathFromResource(resourceUrl, fallbackPath = null) {
 function buildCatalogEntries(routes = routeConfig, options = {}) {
   const includeDiscoveryFields = Boolean(options.includeDiscoveryFields);
   return Object.entries(routes)
-    .filter(([key]) => !shouldHideRouteInProduction(key, options))
-    .filter(([key]) => shouldIncludeRouteInDiscovery(key, options))
+    .filter(([key, config]) => !shouldHideRouteInProduction(getDisplayRouteKey(key, config), options))
+    .filter(([key, config]) => shouldIncludeRouteInDiscovery(getDisplayRouteKey(key, config), options))
     .map(([key, config]) => {
-    const [method, path] = key.split(" ");
+    const displayRouteKey = getDisplayRouteKey(key, config);
+    const [method, path] = String(displayRouteKey).split(" ");
     const paymentOption = getPrimaryPaymentOption(config);
     const resourceUrl = config.resource ?? paymentOption?.resource ?? null;
 
@@ -2966,9 +3479,9 @@ function buildCatalogEntries(routes = routeConfig, options = {}) {
       return baseEntry;
     }
 
-    return {
+      return {
       ...baseEntry,
-      routeKey: key,
+      routeKey: displayRouteKey,
       priceUsd: parseUsdPriceValue(paymentOption?.price ?? config.price ?? null),
       examplePath: getExamplePathFromResource(resourceUrl, path),
       exampleUrl: resourceUrl,
@@ -3276,18 +3789,40 @@ function buildBundledSellerResourceUrls(options = {}) {
   return resources;
 }
 
+function selectRoutes(routeKeys = [], routes = routeConfig) {
+  const selected = {};
+
+  for (const requestedRouteKey of routeKeys) {
+    for (const [actualRouteKey, config] of Object.entries(routes)) {
+      if (
+        actualRouteKey === requestedRouteKey
+        || getDisplayRouteKey(actualRouteKey, config) === requestedRouteKey
+      ) {
+        selected[actualRouteKey] = config;
+      }
+    }
+  }
+
+  return selected;
+}
+
 function buildWellKnownManifest(manifest = WELL_KNOWN_X402_AURELIAN, routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   const metadata = getOriginMetadata(env);
   const hiddenRouteMatchers = options.hiddenRouteMatchers || buildHiddenRouteMatchers();
+  const includeBundledSellerResources = options.includeBundledSellerResources !== false;
   const staticResources = Array.isArray(manifest?.resources)
     ? manifest.resources.filter(
         (resourceUrl) => !shouldHideResourceUrlInProduction(resourceUrl, { env, hiddenRouteMatchers }),
       )
     : [];
-  const bundledSellerResources = buildBundledSellerResourceUrls({ env, hiddenRouteMatchers });
+  const bundledSellerResources = includeBundledSellerResources
+    ? buildBundledSellerResourceUrls({ env, hiddenRouteMatchers })
+    : [];
   const resources = [...new Set([...staticResources, ...bundledSellerResources])];
-  const endpoints = buildWellKnownEndpointEntries(routes, { env });
+  const endpoints = Array.isArray(options.precomputedEndpoints)
+    ? options.precomputedEndpoints
+    : buildWellKnownEndpointEntries(routes, { env });
   const ownershipProofs = resolveOwnershipProofs(manifest, env);
 
   return {
@@ -3337,10 +3872,25 @@ function getRequestBaseUrl(req) {
 }
 
 function getOriginMetadata(env = process.env) {
-  const title = String(env.X402_ORIGIN_TITLE || env.X402_SITE_TITLE || DEFAULT_ORIGIN_TITLE).trim();
-  const description = String(
-    env.X402_ORIGIN_DESCRIPTION || env.X402_SITE_DESCRIPTION || DEFAULT_ORIGIN_DESCRIPTION,
-  ).trim();
+  const legacyTitlePattern = /^AurelianFlo$/i;
+  const legacyDescriptionPattern =
+    /^Professional document generation \(DOCX, XLSX, PDF\), Monte Carlo simulation, and compliance screening \(OFAC\/sanctions\/vendor due diligence\).*x402-paid$/i;
+  const sanitizeMetadataValue = (value) =>
+    String(value || "")
+      .replace(/\uFEFF/g, "")
+      .replace(/ï»¿/g, "")
+      .replace(/\r?\n/g, " ")
+      .trim();
+  const configuredTitle = sanitizeMetadataValue(env.X402_ORIGIN_TITLE || env.X402_SITE_TITLE);
+  const configuredDescription = sanitizeMetadataValue(
+    env.X402_ORIGIN_DESCRIPTION || env.X402_SITE_DESCRIPTION,
+  );
+  const title = configuredTitle && !legacyTitlePattern.test(configuredTitle)
+    ? configuredTitle
+    : DEFAULT_ORIGIN_TITLE;
+  const description = configuredDescription && !legacyDescriptionPattern.test(configuredDescription)
+    ? configuredDescription
+    : DEFAULT_ORIGIN_DESCRIPTION;
 
   return {
     title: title || DEFAULT_ORIGIN_TITLE,
@@ -3372,6 +3922,90 @@ function shouldRenderHealthHtml(req) {
   return !acceptsJson;
 }
 
+function getFlagshipCatalogEntries(catalog = []) {
+  const byRouteKey = new Map(
+    catalog
+      .filter((entry) => FLAGSHIP_ROUTE_KEYS.has(entry.routeKey))
+      .map((entry) => [entry.routeKey, entry]),
+  );
+
+  return FLAGSHIP_ROUTE_ORDER
+    .map((routeKey) => byRouteKey.get(routeKey))
+    .filter(Boolean)
+    .map((entry) => ({
+      ...entry,
+      editorial: FLAGSHIP_ROUTE_EDITORIAL[entry.routeKey] || null,
+    }));
+}
+
+function buildMcpDocHtml({ title, summary, sections = [], links = [] }) {
+  const safeTitle = escapeHtml(title || "AurelianFlo MCP");
+  const safeSummary = escapeHtml(summary || "");
+  const sectionsMarkup = sections
+    .map((section) => {
+      const heading = escapeHtml(section.heading || "");
+      const items = Array.isArray(section.items) ? section.items : [];
+      const itemsMarkup = items
+        .map((item) => `<li>${escapeHtml(item)}</li>`)
+        .join("");
+      return `<section class="doc-section"><h2>${heading}</h2><ul>${itemsMarkup}</ul></section>`;
+    })
+    .join("");
+  const linksMarkup = links
+    .map(
+      (link) => `
+        <a href="${escapeHtml(link.href || "#")}" rel="nofollow">
+          <small>${escapeHtml(link.label || "")}</small>
+          <span>${escapeHtml(link.value || "")}</span>
+        </a>`,
+    )
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${safeTitle}</title>
+  <style>
+    :root {
+      --gold: #C8942A;
+      --bright-gold: #D4A84B;
+      --parchment: #F5F0E8;
+      --bg: #121210;
+      --panel: rgba(245, 240, 232, 0.05);
+      --line: rgba(212, 168, 75, 0.28);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: linear-gradient(180deg, #181816 0%, #121210 100%); color: var(--parchment); font-family: "Manrope", "Segoe UI", sans-serif; }
+    body { padding: 28px 18px 56px; }
+    .page { width: min(980px, 100%); margin: 0 auto; }
+    .rule { height: 1px; background: linear-gradient(90deg, transparent 0%, var(--bright-gold) 18%, var(--bright-gold) 82%, transparent 100%); margin: 18px 0 26px; }
+    h1, h2 { font-family: "Georgia", serif; font-weight: 600; letter-spacing: -0.02em; }
+    h1 { margin: 0 0 10px; font-size: clamp(2.4rem, 6vw, 3.6rem); }
+    h2 { margin: 0 0 14px; font-size: 1.5rem; }
+    .summary { margin: 0 0 28px; color: rgba(245, 240, 232, 0.74); line-height: 1.7; max-width: 52rem; }
+    .link-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 28px; }
+    .link-grid a { text-decoration: none; color: inherit; border: 1px solid rgba(245, 240, 232, 0.08); background: var(--panel); padding: 15px 16px; }
+    .link-grid small { display: block; color: var(--bright-gold); text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.68rem; margin-bottom: 6px; }
+    .link-grid span { font-size: 0.92rem; line-height: 1.5; word-break: break-word; }
+    .doc-section { border-top: 1px solid var(--line); padding-top: 18px; margin-top: 22px; }
+    ul { margin: 0; padding-left: 18px; color: rgba(245, 240, 232, 0.86); line-height: 1.7; }
+    li + li { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="rule"></div>
+    <h1>${safeTitle}</h1>
+    <p class="summary">${safeSummary}</p>
+    <div class="link-grid">${linksMarkup}</div>
+    ${sectionsMarkup}
+  </main>
+</body>
+</html>`;
+}
+
 function escapeHtml(value) {
   return String(value || "").replace(/[&<>"']/g, (char) => {
     const replacements = {
@@ -3389,8 +4023,13 @@ function buildOriginLandingHtml(options = {}) {
   const title = escapeHtml(options.title || DEFAULT_ORIGIN_TITLE);
   const description = escapeHtml(options.description || DEFAULT_ORIGIN_DESCRIPTION);
   const baseUrl = String(options.baseUrl || CANONICAL_BASE_URL).replace(/\/+$/, "");
+  const safeBaseUrl = escapeHtml(baseUrl);
   const wrappedUrl = escapeHtml(String(options.wrappedUrl || WRAPPED_PRODUCT_URL).replace(/\/+$/, ""));
   const endpointCount = Number(options.endpointCount || 0);
+  const catalogUrl = `${safeBaseUrl}/api`;
+  const openApiUrl = `${safeBaseUrl}/openapi.json`;
+  const mcpUrl = `${safeBaseUrl}/mcp`;
+  const serverCardUrl = `${safeBaseUrl}/.well-known/mcp/server-card.json`;
 
   return `<!doctype html>
 <html lang="en">
@@ -3400,40 +4039,1539 @@ function buildOriginLandingHtml(options = {}) {
   <title>${title}</title>
   <meta name="description" content="${description}" />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="${baseUrl}/" />
+  <meta property="og:url" content="${safeBaseUrl}/" />
   <meta property="og:title" content="${title}" />
   <meta property="og:description" content="${description}" />
-  <meta property="og:image" content="${baseUrl}/icon.png" />
+  <meta property="og:image" content="${safeBaseUrl}/icon.png" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:url" content="${baseUrl}/" />
+  <meta name="twitter:url" content="${safeBaseUrl}/" />
   <meta name="twitter:title" content="${title}" />
   <meta name="twitter:description" content="${description}" />
-  <meta name="twitter:image" content="${baseUrl}/icon.png" />
-  <link rel="alternate" type="application/json" href="${baseUrl}/api" />
-  <link rel="icon" href="${baseUrl}/favicon.ico" />
+  <meta name="twitter:image" content="${safeBaseUrl}/icon.png" />
+  <link rel="alternate" type="application/json" href="${catalogUrl}" />
+  <link rel="icon" href="${safeBaseUrl}/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    body {font-family: system-ui, sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #fafafa; color: #111;}
-    main {text-align: center; padding: 2rem;}
-    h1 {margin: 0 0 1rem; font-size: 2.5rem;}
-    p {max-width: 42ch; margin: 0 auto 1.5rem; line-height: 1.4;}
-    .cta {display: inline-flex; gap: .75rem; flex-wrap: wrap; justify-content: center;}
-    a.btn {display: inline-block; padding: .75rem 1.5rem; background: #111; color: #fff; text-decoration: none; border-radius: 4px;}
-    a.btn.secondary {background: #fff; color: #111; border: 1px solid #d0d0d0;}
-    .meta {margin-top: 1rem; color: #666; font-size: .95rem;}
+    :root {
+      --gold: #C8942A;
+      --bright-gold: #D4A84B;
+      --foundry-black: #1A1A1A;
+      --deep-charcoal: #121210;
+      --parchment: #F5F0E8;
+      --slate: #4A4A4A;
+      --warm-gray: #8C857A;
+      --light-slate: #A8A29E;
+      --signal-red: #C44536;
+      --forge-green: #3D7A4A;
+      --line: rgba(212, 168, 75, 0.45);
+      --panel: rgba(245, 240, 232, 0.055);
+      --panel-strong: rgba(245, 240, 232, 0.08);
+      --shadow: 0 28px 80px rgba(0, 0, 0, 0.28);
+      --max-width: 1220px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background:
+        radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 30%),
+        radial-gradient(circle at 82% 12%, rgba(245, 240, 232, 0.09), transparent 26%),
+        linear-gradient(180deg, #181816 0%, #121210 56%, #161512 100%);
+      color: var(--parchment);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      color: var(--parchment);
+      background:
+        linear-gradient(135deg, rgba(200, 148, 42, 0.04) 0%, transparent 24%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.085;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
+      background-size: 120px 120px;
+      mask-image: radial-gradient(circle at center, black 34%, transparent 100%);
+    }
+
+    a { color: inherit; }
+
+    .page {
+      width: min(var(--max-width), calc(100vw - 40px));
+      margin: 0 auto;
+      padding: 42px 0 80px;
+      position: relative;
+    }
+
+    .topline,
+    .section-rule {
+      height: 1px;
+      width: 100%;
+      background: linear-gradient(90deg, transparent 0%, var(--bright-gold) 18%, var(--bright-gold) 82%, transparent 100%);
+      opacity: 0.95;
+    }
+
+    .topline {
+      margin: 24px 0 34px;
+      animation: revealRule 1.2s ease forwards;
+      transform-origin: left center;
+      transform: scaleX(0.2);
+    }
+
+    .masthead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
+      gap: 34px;
+      align-items: end;
+      padding: 18px 0 26px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--bright-gold);
+      font-size: 0.78rem;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 52px;
+      height: 1px;
+      background: currentColor;
+      opacity: 0.7;
+    }
+
+    .headline {
+      margin: 0;
+      max-width: 12ch;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 600;
+      font-size: clamp(4rem, 9vw, 6.75rem);
+      line-height: 0.92;
+      letter-spacing: -0.04em;
+      text-wrap: balance;
+      animation: riseIn 0.95s ease forwards;
+    }
+
+    .lede {
+      margin: 24px 0 0;
+      max-width: 44rem;
+      color: rgba(245, 240, 232, 0.78);
+      font-size: clamp(1.08rem, 1.8vw, 1.22rem);
+      line-height: 1.72;
+      animation: riseIn 1.1s ease forwards;
+    }
+
+    .signal-panel {
+      padding: 26px 24px;
+      border: 1px solid rgba(212, 168, 75, 0.28);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01)),
+        rgba(18, 18, 16, 0.72);
+      box-shadow: var(--shadow);
+      position: relative;
+      overflow: hidden;
+      animation: riseIn 1.2s ease forwards;
+    }
+
+    .signal-panel::after {
+      content: "";
+      position: absolute;
+      inset: auto -40px -42px auto;
+      width: 180px;
+      height: 180px;
+      border-radius: 999px;
+      background: radial-gradient(circle, rgba(212, 168, 75, 0.2), transparent 68%);
+    }
+
+    .signal-label {
+      color: var(--bright-gold);
+      font-size: 0.76rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    .signal-value {
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(2.4rem, 4.2vw, 3.2rem);
+      line-height: 1;
+      margin: 0 0 10px;
+    }
+
+    .signal-copy {
+      margin: 0;
+      color: rgba(245, 240, 232, 0.68);
+      line-height: 1.7;
+      font-size: 0.98rem;
+    }
+
+    .signal-grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .signal-stat {
+      padding-top: 14px;
+      border-top: 1px solid rgba(245, 240, 232, 0.12);
+    }
+
+    .signal-stat strong {
+      display: block;
+      color: var(--parchment);
+      font-size: 0.94rem;
+      margin-bottom: 4px;
+    }
+
+    .signal-stat span {
+      color: rgba(245, 240, 232, 0.6);
+      font-size: 0.88rem;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin: 30px 0 0;
+      animation: riseIn 1.25s ease forwards;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 15px 22px;
+      min-height: 52px;
+      border: 1px solid transparent;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.76rem;
+      font-weight: 700;
+      transition: transform 180ms ease, background 180ms ease, border-color 180ms ease, color 180ms ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+
+    .btn-primary {
+      background: var(--bright-gold);
+      color: var(--deep-charcoal);
+      box-shadow: 0 14px 30px rgba(212, 168, 75, 0.18);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border-color: rgba(245, 240, 232, 0.18);
+      color: var(--parchment);
+    }
+
+    .btn-tertiary {
+      background: rgba(245, 240, 232, 0.05);
+      border-color: rgba(212, 168, 75, 0.22);
+      color: var(--bright-gold);
+    }
+
+    .kicker-row {
+      margin-top: 22px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: rgba(245, 240, 232, 0.6);
+      font-size: 0.88rem;
+    }
+
+    .kicker-pill {
+      border: 1px solid rgba(245, 240, 232, 0.1);
+      padding: 10px 12px;
+      background: rgba(245, 240, 232, 0.03);
+    }
+
+    .section {
+      margin-top: 58px;
+      padding-top: 30px;
+    }
+
+    .section-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(240px, 0.7fr);
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 26px;
+    }
+
+    .section-title {
+      margin: 0;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(2.3rem, 4vw, 3.4rem);
+      line-height: 0.98;
+      letter-spacing: -0.03em;
+    }
+
+    .section-copy {
+      margin: 0;
+      color: rgba(245, 240, 232, 0.7);
+      line-height: 1.75;
+      font-size: 1rem;
+    }
+
+    .discipline-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 0.95fr 0.9fr;
+      gap: 18px;
+    }
+
+    .discipline {
+      min-height: 260px;
+      padding: 22px 22px 20px;
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015)),
+        var(--panel);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .discipline:nth-child(1) { transform: translateY(0); }
+    .discipline:nth-child(2) { transform: translateY(28px); }
+    .discipline:nth-child(3) { transform: translateY(56px); }
+
+    .discipline::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, var(--bright-gold), transparent);
+      opacity: 0.88;
+    }
+
+    .discipline-label {
+      color: var(--bright-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      font-size: 0.74rem;
+      margin-bottom: 18px;
+    }
+
+    .discipline h3 {
+      margin: 0 0 14px;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 2.1rem;
+      line-height: 0.96;
+    }
+
+    .discipline p {
+      margin: 0 0 20px;
+      color: rgba(245, 240, 232, 0.74);
+      line-height: 1.74;
+      font-size: 0.98rem;
+      max-width: 28rem;
+    }
+
+    .discipline ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .discipline li {
+      color: rgba(245, 240, 232, 0.84);
+      font-size: 0.92rem;
+      padding-left: 15px;
+      position: relative;
+    }
+
+    .discipline li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.62em;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--bright-gold);
+    }
+
+    .split-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr);
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .editorial-panel,
+    .link-panel {
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+        var(--panel-strong);
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .editorial-panel h3,
+    .link-panel h3 {
+      margin: 0 0 16px;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .editorial-panel p,
+    .link-panel p {
+      margin: 0 0 18px;
+      color: rgba(245, 240, 232, 0.72);
+      line-height: 1.75;
+    }
+
+    .list-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .list-row {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(245, 240, 232, 0.08);
+    }
+
+    .list-row strong {
+      color: var(--bright-gold);
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.16em;
+      line-height: 1.5;
+    }
+
+    .list-row span {
+      color: rgba(245, 240, 232, 0.82);
+      line-height: 1.65;
+      font-size: 0.94rem;
+    }
+
+    .link-stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .link-stack a {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      padding: 16px 18px;
+      text-decoration: none;
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background: rgba(18, 18, 16, 0.54);
+      transition: border-color 180ms ease, transform 180ms ease, color 180ms ease;
+    }
+
+    .link-stack a:hover {
+      border-color: rgba(212, 168, 75, 0.4);
+      transform: translateX(4px);
+      color: var(--bright-gold);
+    }
+
+    .link-stack small {
+      display: block;
+      color: rgba(245, 240, 232, 0.5);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .link-stack span {
+      font-size: 0.98rem;
+      line-height: 1.4;
+      text-wrap: balance;
+    }
+
+    .link-stack b {
+      font-size: 1.1rem;
+      font-weight: 500;
+    }
+
+    .footer-note {
+      margin-top: 58px;
+      padding-top: 26px;
+      border-top: 1px solid rgba(212, 168, 75, 0.24);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px 24px;
+      color: rgba(245, 240, 232, 0.56);
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    @keyframes riseIn {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes revealRule {
+      from { transform: scaleX(0.2); opacity: 0.2; }
+      to { transform: scaleX(1); opacity: 1; }
+    }
+
+    @media (max-width: 1040px) {
+      .masthead,
+      .section-header,
+      .split-layout,
+      .discipline-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .discipline:nth-child(1),
+      .discipline:nth-child(2),
+      .discipline:nth-child(3) {
+        transform: none;
+      }
+
+      .headline {
+        max-width: 14ch;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        width: min(100vw - 24px, var(--max-width));
+        padding: 24px 0 52px;
+      }
+
+      .headline {
+        font-size: clamp(3.1rem, 15vw, 4.8rem);
+      }
+
+      .signal-grid,
+      .list-row {
+        grid-template-columns: 1fr;
+      }
+
+      .btn {
+        width: 100%;
+      }
+
+      .footer-note {
+        flex-direction: column;
+      }
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h1>${title}</h1>
-    <p>${description}</p>
-    <div class="cta">
-      <a class="btn" href="${baseUrl}/api" rel="nofollow">View Endpoint Catalog</a>
-      <a class="btn secondary" href="${wrappedUrl}" rel="nofollow">Explore AurelianFlo Wrapped</a>
-    </div>
-    <p class="meta">Endpoints indexed: ${endpointCount}</p>
+  <main class="page">
+    <div class="topline"></div>
+
+    <section class="masthead">
+      <div>
+        <div class="eyebrow">AurelianFlo</div>
+        <h1 class="headline">${title}</h1>
+        <p class="lede">Onchain compliance, decision analysis, and premium reporting.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="${catalogUrl}" rel="nofollow">Catalog</a>
+          <a class="btn btn-secondary" href="${openApiUrl}" rel="nofollow">OpenAPI</a>
+          <a class="btn btn-tertiary" href="${wrappedUrl}" rel="nofollow">App</a>
+        </div>
+        <div class="kicker-row">
+          <div class="kicker-pill">USDC on Base</div>
+          <div class="kicker-pill">Remote MCP ready</div>
+          <div class="kicker-pill">No API keys required</div>
+        </div>
+      </div>
+
+      <aside class="signal-panel">
+        <div class="signal-label">Service</div>
+        <p class="signal-value">${endpointCount}</p>
+        <p class="signal-copy">Primary public surface.</p>
+        <div class="signal-grid">
+          <div class="signal-stat">
+            <strong>Compliance</strong>
+            <span>OFAC wallet screening.</span>
+          </div>
+          <div class="signal-stat">
+            <strong>Reports</strong>
+            <span>Wallet screening reports and Monte Carlo decision memos.</span>
+          </div>
+          <div class="signal-stat">
+            <strong>Documents</strong>
+            <span>PDF and DOCX output from a shared report model.</span>
+          </div>
+          <div class="signal-stat">
+            <strong>Protocol</strong>
+            <span>x402 over HTTP and MCP.</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="section-rule"></div>
+      <div class="section-header">
+        <h2 class="section-title">Core services.</h2>
+        <p class="section-copy">Compliance and decision analysis, then document output.</p>
+      </div>
+      <div class="discipline-grid">
+        <article class="discipline">
+          <div class="discipline-label">01 / Compliance</div>
+          <h3>OFAC wallet screening.</h3>
+          <ul>
+            <li>Lead endpoint: GET /api/ofac-wallet-screen/:address</li>
+            <li>Allow, pause, or block outcome</li>
+            <li>Exact-match onchain screening plus report payload</li>
+          </ul>
+        </article>
+        <article class="discipline">
+          <div class="discipline-label">02 / Decision Analysis</div>
+          <h3>Monte Carlo reports.</h3>
+          <ul>
+            <li>Lead endpoint: POST /api/sim/report</li>
+            <li>Structured decision memo from supported simulation workflows</li>
+            <li>Executive summary, metrics, and workbook-ready tables</li>
+          </ul>
+        </article>
+        <article class="discipline">
+          <div class="discipline-label">03 / Documents</div>
+          <h3>PDF reports.</h3>
+          <ul>
+            <li>Lead endpoint: POST /api/tools/report/pdf/generate</li>
+            <li>Fixed-layout compliance memo</li>
+            <li>Distribution and audit handoff</li>
+          </ul>
+        </article>
+        <article class="discipline">
+          <div class="discipline-label">04 / Documents</div>
+          <h3>DOCX reports.</h3>
+          <ul>
+            <li>Lead endpoint: POST /api/tools/report/docx/generate</li>
+            <li>Word-native compliance memo</li>
+            <li>Revision and markup workflow</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-rule"></div>
+      <div class="split-layout">
+        <article class="editorial-panel">
+          <h3>Sequence.</h3>
+          <div class="list-grid">
+            <div class="list-row">
+              <strong>Scope</strong>
+              <span>Wallet screening, Monte Carlo decision analysis, and document generation.</span>
+            </div>
+            <div class="list-row">
+              <strong>Flow</strong>
+              <span>Screen, model, deliver.</span>
+            </div>
+            <div class="list-row">
+              <strong>Output</strong>
+              <span>JSON, PDF, and DOCX.</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="link-panel">
+          <h3>Discovery rails</h3>
+          <div class="link-stack">
+            <a href="${catalogUrl}" rel="nofollow">
+              <div>
+                <small>Catalog</small>
+                <span>Browser catalog for core services.</span>
+              </div>
+              <b>API</b>
+            </a>
+            <a href="${openApiUrl}" rel="nofollow">
+              <div>
+                <small>Schema</small>
+                <span>Canonical OpenAPI contract for HTTP clients and discovery tools.</span>
+              </div>
+              <b>JSON</b>
+            </a>
+            <a href="${mcpUrl}" rel="nofollow">
+              <div>
+                <small>Remote MCP</small>
+                <span>Streamable MCP endpoint for Claude-compatible tool access.</span>
+              </div>
+              <b>/mcp</b>
+            </a>
+            <a href="${serverCardUrl}" rel="nofollow">
+              <div>
+                <small>Server Card</small>
+                <span>Static MCP metadata for review, scanning, and connector setup.</span>
+              </div>
+              <b>MCP</b>
+            </a>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <footer class="footer-note">
+      <span>${endpointCount} public routes</span>
+      <span>Base / USDC / x402</span>
+      <span>AurelianFlo</span>
+    </footer>
   </main>
 </body>
 </html>`;
+}
+
+function buildApiDiscoveryHtml(options = {}) {
+  const title = escapeHtml(options.title || DEFAULT_ORIGIN_TITLE);
+  const description = escapeHtml(options.description || DEFAULT_ORIGIN_DESCRIPTION);
+  const baseUrl = String(options.baseUrl || CANONICAL_BASE_URL).replace(/\/+$/, "");
+  const safeBaseUrl = escapeHtml(baseUrl);
+  const openApiUrl = `${safeBaseUrl}/openapi.json`;
+  const jsonCatalogUrl = `${safeBaseUrl}/api?format=json`;
+  const fullDiscoveryUrl = `${safeBaseUrl}/api/system/discovery/full?format=json`;
+  const mcpUrl = `${safeBaseUrl}/mcp`;
+  const serverCardUrl = `${safeBaseUrl}/.well-known/mcp/server-card.json`;
+  const flagshipEntries = Array.isArray(options.flagshipEntries) ? options.flagshipEntries : [];
+  const endpointCount = Number(options.endpointCount || 0);
+  const featuredCount = flagshipEntries.length;
+  const cardsMarkup = flagshipEntries
+    .map((entry) => {
+      const editorial = entry.editorial || {};
+      const titleText = escapeHtml(editorial.title || entry.path);
+      const discipline = escapeHtml(editorial.discipline || entry.category || "Flagship");
+      const sequence = escapeHtml(editorial.sequence || "");
+      const summary = escapeHtml(editorial.summary || entry.description || "");
+      const method = escapeHtml(entry.method || "");
+      const routePath = escapeHtml(entry.path || "");
+      const price = escapeHtml(entry.price || "$0.00");
+      const examplePath = escapeHtml(entry.examplePath || entry.path || "");
+      const exampleUrl = escapeHtml(entry.exampleUrl || `${safeBaseUrl}${entry.examplePath || entry.path || ""}`);
+
+      return `
+        <article class="flagship-card">
+          <div class="flagship-topline">
+            <span>${sequence}</span>
+            <strong>${discipline}</strong>
+          </div>
+          <h2>${titleText}</h2>
+          <p class="flagship-summary">${summary}</p>
+          <div class="route-meta">
+            <span class="method">${method}</span>
+            <code>${routePath}</code>
+            <b>${price}</b>
+          </div>
+          <div class="route-foot">
+            <div>
+              <small>Example path</small>
+              <span>${examplePath}</span>
+            </div>
+            <a href="${exampleUrl}" rel="nofollow">Inspect example</a>
+          </div>
+        </article>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title} / Flagship Catalog</title>
+  <meta name="description" content="${description}" />
+  <link rel="icon" href="${safeBaseUrl}/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --gold: #C8942A;
+      --bright-gold: #D4A84B;
+      --foundry-black: #1A1A1A;
+      --deep-charcoal: #121210;
+      --parchment: #F5F0E8;
+      --slate: #4A4A4A;
+      --warm-gray: #8C857A;
+      --line: rgba(212, 168, 75, 0.3);
+      --panel: rgba(245, 240, 232, 0.055);
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
+      --max-width: 1220px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background:
+        radial-gradient(circle at top left, rgba(212, 168, 75, 0.18), transparent 30%),
+        linear-gradient(180deg, #181816 0%, #121210 60%, #151410 100%);
+      color: var(--parchment);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Manrope", "Segoe UI", sans-serif;
+      color: var(--parchment);
+      background:
+        linear-gradient(135deg, rgba(200, 148, 42, 0.045) 0%, transparent 24%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+    }
+
+    a { color: inherit; }
+
+    .page {
+      width: min(var(--max-width), calc(100vw - 36px));
+      margin: 0 auto;
+      padding: 34px 0 72px;
+    }
+
+    .rule {
+      height: 1px;
+      width: 100%;
+      background: linear-gradient(90deg, transparent 0%, var(--bright-gold) 16%, var(--bright-gold) 84%, transparent 100%);
+      margin: 20px 0 30px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 28px;
+      align-items: end;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--bright-gold);
+      font-size: 0.78rem;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 52px;
+      height: 1px;
+      background: currentColor;
+      opacity: 0.7;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 10ch;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-weight: 600;
+      font-size: clamp(3.5rem, 8vw, 5.6rem);
+      line-height: 0.94;
+      letter-spacing: -0.04em;
+    }
+
+    .lede {
+      margin: 22px 0 0;
+      max-width: 44rem;
+      color: rgba(245, 240, 232, 0.76);
+      font-size: clamp(1.02rem, 1.8vw, 1.18rem);
+      line-height: 1.76;
+    }
+
+    .hero-panel,
+    .context-panel,
+    .rail-panel {
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01)),
+        var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .hero-panel {
+      padding: 24px;
+    }
+
+    .hero-panel strong {
+      display: block;
+      color: var(--bright-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      font-size: 0.74rem;
+      margin-bottom: 14px;
+    }
+
+    .hero-panel p {
+      margin: 0;
+      color: rgba(245, 240, 232, 0.72);
+      line-height: 1.74;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+
+    .hero-metrics div {
+      padding-top: 14px;
+      border-top: 1px solid rgba(245, 240, 232, 0.1);
+    }
+
+    .hero-metrics b {
+      display: block;
+      font-size: 1.05rem;
+      margin-bottom: 4px;
+    }
+
+    .hero-metrics span {
+      color: rgba(245, 240, 232, 0.56);
+      font-size: 0.86rem;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      margin-top: 28px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 50px;
+      padding: 14px 20px;
+      text-decoration: none;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.74rem;
+      font-weight: 800;
+      border: 1px solid transparent;
+      transition: transform 180ms ease, border-color 180ms ease, color 180ms ease;
+    }
+
+    .btn:hover { transform: translateY(-2px); }
+
+    .btn-primary {
+      background: var(--bright-gold);
+      color: var(--deep-charcoal);
+      box-shadow: 0 14px 30px rgba(212, 168, 75, 0.18);
+    }
+
+    .btn-secondary {
+      border-color: rgba(245, 240, 232, 0.16);
+      background: transparent;
+    }
+
+    .section {
+      margin-top: 54px;
+    }
+
+    .section-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.76fr);
+      gap: 24px;
+      align-items: end;
+      margin-bottom: 24px;
+    }
+
+    .section-head h2 {
+      margin: 0;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: clamp(2.2rem, 4vw, 3.4rem);
+      line-height: 0.98;
+      letter-spacing: -0.03em;
+    }
+
+    .section-head p {
+      margin: 0;
+      color: rgba(245, 240, 232, 0.68);
+      line-height: 1.74;
+    }
+
+    .flagship-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .flagship-card {
+      padding: 24px;
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.012)),
+        rgba(18, 18, 16, 0.72);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .flagship-card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, var(--bright-gold), transparent);
+    }
+
+    .flagship-topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 16px;
+      color: var(--bright-gold);
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      font-size: 0.72rem;
+    }
+
+    .flagship-card h2 {
+      margin: 0 0 14px;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 2rem;
+      line-height: 0.98;
+    }
+
+    .flagship-summary,
+    .flagship-proof {
+      margin: 0;
+      color: rgba(245, 240, 232, 0.74);
+      line-height: 1.72;
+      font-size: 0.96rem;
+    }
+
+    .flagship-proof {
+      margin-top: 16px;
+      color: rgba(245, 240, 232, 0.62);
+    }
+
+    .route-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 12px;
+      align-items: center;
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(245, 240, 232, 0.08);
+    }
+
+    .method,
+    .route-meta b {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 10px;
+      border: 1px solid rgba(212, 168, 75, 0.2);
+      background: rgba(212, 168, 75, 0.09);
+      color: var(--bright-gold);
+      font-size: 0.74rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .route-meta code {
+      color: var(--parchment);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.88rem;
+      word-break: break-word;
+    }
+
+    .route-foot {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(245, 240, 232, 0.08);
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: end;
+    }
+
+    .route-foot small {
+      display: block;
+      color: rgba(245, 240, 232, 0.48);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 0.68rem;
+      margin-bottom: 6px;
+    }
+
+    .route-foot span {
+      color: rgba(245, 240, 232, 0.82);
+      font-size: 0.9rem;
+      word-break: break-word;
+    }
+
+    .route-foot a {
+      white-space: nowrap;
+      text-decoration: none;
+      color: var(--bright-gold);
+      font-size: 0.84rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .lower-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(300px, 0.8fr);
+      gap: 20px;
+    }
+
+    .context-panel,
+    .rail-panel {
+      padding: 24px;
+    }
+
+    .context-panel h3,
+    .rail-panel h3 {
+      margin: 0 0 16px;
+      font-family: "Cormorant Garamond", Georgia, serif;
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .context-panel p,
+    .rail-panel p {
+      margin: 0 0 18px;
+      color: rgba(245, 240, 232, 0.7);
+      line-height: 1.74;
+    }
+
+    .bullet-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .bullet {
+      padding-top: 14px;
+      border-top: 1px solid rgba(245, 240, 232, 0.08);
+    }
+
+    .bullet strong {
+      display: block;
+      color: var(--bright-gold);
+      font-size: 0.76rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .bullet span {
+      color: rgba(245, 240, 232, 0.82);
+      line-height: 1.68;
+      font-size: 0.94rem;
+    }
+
+    .rail-stack {
+      display: grid;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .rail-stack a {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 18px;
+      border: 1px solid rgba(245, 240, 232, 0.08);
+      background: rgba(18, 18, 16, 0.56);
+      text-decoration: none;
+      transition: transform 180ms ease, border-color 180ms ease;
+    }
+
+    .rail-stack a:hover {
+      transform: translateX(4px);
+      border-color: rgba(212, 168, 75, 0.4);
+    }
+
+    .rail-stack small {
+      display: block;
+      color: rgba(245, 240, 232, 0.48);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 0.68rem;
+      margin-bottom: 5px;
+    }
+
+    .rail-stack span {
+      color: rgba(245, 240, 232, 0.84);
+      line-height: 1.45;
+    }
+
+    .rail-stack b {
+      color: var(--bright-gold);
+      font-weight: 600;
+    }
+
+    .footer-note {
+      margin-top: 54px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px 20px;
+      color: rgba(245, 240, 232, 0.58);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.83rem;
+    }
+
+    @media (max-width: 1040px) {
+      .hero,
+      .section-head,
+      .lower-grid,
+      .flagship-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .page {
+        width: min(100vw - 22px, var(--max-width));
+        padding: 22px 0 50px;
+      }
+
+      h1 {
+        font-size: clamp(3rem, 15vw, 4.6rem);
+      }
+
+      .cta-row,
+      .route-foot,
+      .hero-metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .btn {
+        width: 100%;
+      }
+
+      .hero-metrics {
+        display: grid;
+      }
+
+      .route-foot {
+        align-items: start;
+        flex-direction: column;
+      }
+
+      .footer-note {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="rule"></div>
+
+    <section class="hero">
+      <div>
+        <div class="eyebrow">AurelianFlo</div>
+        <h1>Service catalog.</h1>
+        <p class="lede">Onchain compliance, Monte Carlo decision analysis, and premium document output.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="${jsonCatalogUrl}" rel="nofollow">JSON</a>
+          <a class="btn btn-secondary" href="${openApiUrl}" rel="nofollow">OpenAPI</a>
+        </div>
+      </div>
+
+      <aside class="hero-panel">
+        <strong>Summary</strong>
+        <div class="hero-metrics">
+          <div>
+            <b>${featuredCount}</b>
+            <span>Featured routes</span>
+          </div>
+          <div>
+            <b>${endpointCount}</b>
+            <span>Public routes in discovery</span>
+          </div>
+          <div>
+            <b>x402</b>
+            <span>USDC on Base</span>
+          </div>
+          <div>
+            <b>MCP</b>
+            <span>Remote access</span>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="section">
+      <div class="rule"></div>
+      <div class="section-head">
+        <h2>Featured routes</h2>
+        <p>Primary routes for the current product surface.</p>
+      </div>
+      <div class="flagship-grid">${cardsMarkup}</div>
+    </section>
+
+    <section class="section">
+      <div class="rule"></div>
+      <div class="lower-grid">
+        <article class="context-panel">
+          <h3>Included here</h3>
+          <div class="bullet-list">
+            <div class="bullet">
+              <strong>Compliance</strong>
+              <span>OFAC wallet screening for allow, pause, or block decisions.</span>
+            </div>
+            <div class="bullet">
+              <strong>Screening report</strong>
+              <span><code>/api/ofac-wallet-screen/:address</code> returns a reviewable report payload.</span>
+            </div>
+            <div class="bullet">
+              <strong>Decision reports</strong>
+              <span><code>/api/sim/report</code> turns supported simulation workflows into analyst-ready memos.</span>
+            </div>
+            <div class="bullet">
+              <strong>Document output</strong>
+              <span>PDF and DOCX generation return the final document.</span>
+            </div>
+          </div>
+        </article>
+
+        <aside class="rail-panel">
+          <h3>Machine rails</h3>
+          <div class="rail-stack">
+            <a href="${jsonCatalogUrl}" rel="nofollow">
+              <div>
+                <small>Public JSON</small>
+                <span>Public discovery payload.</span>
+              </div>
+              <b>API</b>
+            </a>
+            <a href="${fullDiscoveryUrl}" rel="nofollow">
+              <div>
+                <small>Full JSON</small>
+                <span>Full discovery inventory.</span>
+              </div>
+              <b>FULL</b>
+            </a>
+            <a href="${mcpUrl}" rel="nofollow">
+              <div>
+                <small>Remote MCP</small>
+                <span>Remote MCP endpoint.</span>
+              </div>
+              <b>/mcp</b>
+            </a>
+            <a href="${serverCardUrl}" rel="nofollow">
+              <div>
+                <small>Server Card</small>
+                <span>Static MCP metadata.</span>
+              </div>
+              <b>MCP</b>
+            </a>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <footer class="footer-note">
+      <span>${title}</span>
+      <span>${featuredCount} featured routes</span>
+      <span>${endpointCount} routes in discovery</span>
+    </footer>
+  </main>
+</body>
+</html>`;
+}
+
+function createAurelianFloMcpDocsHandler() {
+  return function aurelianFloMcpDocsHandler(req, res) {
+    const baseUrl = getRequestBaseUrl(req);
+    const html = buildMcpDocHtml({
+      title: "AurelianFlo MCP Docs",
+      summary:
+        "Remote MCP server for bundled OFAC wallet screening and Monte Carlo reporting, with json, PDF, or DOCX output. Start with server_capabilities. Use the direct origin for paid execution.",
+      links: [
+        { label: "MCP Endpoint", value: `${baseUrl}/mcp`, href: `${baseUrl}/mcp` },
+        {
+          label: "Server Card",
+          value: `${baseUrl}/.well-known/mcp/server-card.json`,
+          href: `${baseUrl}/.well-known/mcp/server-card.json`,
+        },
+        { label: "Privacy", value: `${baseUrl}/mcp/privacy`, href: `${baseUrl}/mcp/privacy` },
+        { label: "Support", value: `${baseUrl}/mcp/support`, href: `${baseUrl}/mcp/support` },
+      ],
+      sections: [
+        {
+          heading: "Tools",
+          items: [
+            "server_capabilities: Free connection and capability check with direct and Smithery-hosted modes.",
+            "ofac_wallet_report: One-call OFAC wallet screening with json, pdf, or docx output.",
+            "ofac_wallet_screen: Exact-match OFAC wallet screening with the structured report payload returned in JSON.",
+            "monte_carlo_report: One-call Monte Carlo report with json, pdf, or docx output.",
+            "monte_carlo_decision_report: Structured decision report from supported simulation workflows.",
+            "report_pdf_generate: PDF output from the shared report model.",
+            "report_docx_generate: DOCX output from the shared report model.",
+          ],
+        },
+        {
+          heading: "Bundles",
+          items: [
+            "Compliance bundle: ofac_wallet_report returns the screening result plus json, pdf, or docx output in one call.",
+            "Decision-analysis bundle: monte_carlo_report returns the simulation report plus json, pdf, or docx output in one call.",
+            "Building blocks: monte_carlo_decision_report plus report_pdf_generate or report_docx_generate remains available for clients that want to control each step.",
+          ],
+        },
+        {
+          heading: "Proof",
+          items: [
+            "Compliance canary: ofac_wallet_report screened 0x098B716B8Aaf21512996dC57EB0615e2383E2f96, matched Lazarus Group, and generated a paid PDF artifact on Base.",
+            "Simulation canary: monte_carlo_report preferred candidate, returned candidate outperformance 0.5903, expected score gap 0.2831, and probability uplift 0.0753, then generated a paid PDF artifact on Base.",
+            "Both bundled tools have been exercised against the production MCP endpoint with settled transactions.",
+          ],
+        },
+        {
+          heading: "Example prompts",
+          items: [
+            "Call server_capabilities to verify the server, payment model, and connection modes without paying first.",
+            "Screen 0x098B716B8Aaf21512996dC57EB0615e2383E2f96 and return a PDF with ofac_wallet_report.",
+            "Screen 0x098B716B8Aaf21512996dC57EB0615e2383E2f96 and return the JSON report only with ofac_wallet_screen.",
+            "Generate a compare-style simulation report and return a PDF with monte_carlo_report.",
+            "Generate a forecast-style simulation report and return the JSON payload with monte_carlo_report.",
+            "Render the current Monte Carlo report payload to DOCX with report_docx_generate.",
+          ],
+        },
+        {
+          heading: "Connection modes",
+          items: [
+            "Direct origin: https://x402.aurelianflo.com/mcp",
+            "Smithery-hosted gateway: https://core--aurelianflo.run.tools",
+            "Transport: streamable HTTP MCP.",
+            "Payment: x402 with USDC on Base.",
+          ],
+        },
+        {
+          heading: "Direct origin",
+          items: [
+            "Direct origin: codex mcp add aurelianflo --url https://x402.aurelianflo.com/mcp",
+            "Use the origin directly for paid execution.",
+            "Use the origin directly when the client does not implement Smithery's hosted OAuth flow.",
+          ],
+        },
+        {
+          heading: "Smithery hosted",
+          items: [
+            "Smithery listing: aurelianflo/core",
+            "CLI connection: smithery mcp add aurelianflo/core",
+            "Hosted gateway: codex mcp add aurelianflo-core --url https://core--aurelianflo.run.tools",
+            "Use server_capabilities first on the Smithery-hosted connection.",
+            "The bundled compliance workflow is exposed as ofac_wallet_report.",
+            "The bundled simulation workflow is exposed as monte_carlo_report.",
+            "Paid execution is currently available through the direct origin at https://x402.aurelianflo.com/mcp.",
+            "OAuth-capable clients should follow the Smithery authorization URL when the hosted gateway returns auth_required.",
+            "If Smithery's Windows client installer handoff fails, add the hosted gateway or the direct origin with codex mcp add ... --url ... instead of relying on --client codex.",
+          ],
+        },
+      ],
+    });
+    res.type("text/html; charset=utf-8").send(html);
+  };
+}
+
+function createAurelianFloMcpPrivacyHandler() {
+  return function aurelianFloMcpPrivacyHandler(req, res) {
+    const baseUrl = getRequestBaseUrl(req);
+    const html = buildMcpDocHtml({
+      title: "AurelianFlo MCP Privacy",
+      summary: "Privacy information for the AurelianFlo remote MCP server.",
+      links: [
+        { label: "Docs", value: `${baseUrl}/mcp/docs`, href: `${baseUrl}/mcp/docs` },
+        { label: "Support", value: `${baseUrl}/mcp/support`, href: `${baseUrl}/mcp/support` },
+      ],
+      sections: [
+        {
+          heading: "Data collected",
+          items: [
+            "Tool input payloads required to execute OFAC wallet screening, simulation reporting, and document generation.",
+            "Operational logs required for uptime, debugging, abuse prevention, and billing reconciliation.",
+            "Payment metadata required by x402 settlement flows.",
+          ],
+        },
+        {
+          heading: "Use",
+          items: [
+            "Execute the requested MCP tool call.",
+            "Return structured results and document artifacts.",
+            "Monitor reliability, prevent abuse, and investigate failures.",
+            "Reconcile paid usage and settlement events.",
+          ],
+        },
+        {
+          heading: "Retention and sharing",
+          items: [
+            "Data is retained only as needed for reliability, billing, fraud prevention, and compliance.",
+            "Data may be processed by infrastructure and payment providers required to execute the service.",
+            "Data is not sold for advertising purposes.",
+          ],
+        },
+      ],
+    });
+    res.type("text/html; charset=utf-8").send(html);
+  };
+}
+
+function createAurelianFloMcpSupportHandler() {
+  return function aurelianFloMcpSupportHandler(req, res) {
+    const baseUrl = getRequestBaseUrl(req);
+    const html = buildMcpDocHtml({
+      title: "AurelianFlo MCP Support",
+      summary: "Support information for the AurelianFlo remote MCP server.",
+      links: [
+        { label: "Support Email", value: "support@aurelianflo.com", href: "mailto:support@aurelianflo.com" },
+        { label: "Docs", value: `${baseUrl}/mcp/docs`, href: `${baseUrl}/mcp/docs` },
+        { label: "Privacy", value: `${baseUrl}/mcp/privacy`, href: `${baseUrl}/mcp/privacy` },
+      ],
+      sections: [
+        {
+          heading: "Support scope",
+          items: [
+            "Connection and configuration issues.",
+            "Payment and settlement issues related to x402 tool calls.",
+            "Unexpected tool failures or invalid responses.",
+            "Questions about supported inputs for screening, reporting, and document generation.",
+          ],
+        },
+        {
+          heading: "Channels",
+          items: [
+            "General support: support@aurelianflo.com",
+            "Documentation: public MCP docs at /mcp/docs",
+            "Security issues should be reported separately through the support channel until a dedicated address is published.",
+          ],
+        },
+      ],
+    });
+    res.type("text/html; charset=utf-8").send(html);
+  };
 }
 
 function getRouteDescription(config) {
@@ -3447,7 +5585,7 @@ function getRoutePrice(config) {
 
 function createRouteMatcher(routes = routeConfig) {
   const exactMatches = new Map();
-  const wildcardMatches = [];
+  const patternMatches = [];
 
   for (const [key, config] of Object.entries(routes)) {
     const [method, routePath] = key.split(" ");
@@ -3458,8 +5596,8 @@ function createRouteMatcher(routes = routeConfig) {
       routePath,
     };
 
-    if (routePath.includes("*")) {
-      wildcardMatches.push(entry);
+    if (routePath.includes("*") || routePath.includes(":") || routePath.includes("[")) {
+      patternMatches.push(entry);
     } else {
       exactMatches.set(`${entry.method} ${routePath}`, entry);
     }
@@ -3472,13 +5610,28 @@ function createRouteMatcher(routes = routeConfig) {
       return exactMatches.get(exactKey);
     }
 
-    for (const route of wildcardMatches) {
+    const requestSegments = requestPath.split("/").filter(Boolean);
+    for (const route of patternMatches) {
       if (route.method !== normalizedMethod) {
         continue;
       }
 
-      const prefix = route.routePath.slice(0, route.routePath.indexOf("*"));
-      if (requestPath.startsWith(prefix)) {
+      const routeSegments = String(route.routePath).split("/").filter(Boolean);
+      if (routeSegments.length !== requestSegments.length) {
+        continue;
+      }
+
+      const matched = routeSegments.every((segment, index) => {
+        if (segment === "*") {
+          return true;
+        }
+        if (segment.startsWith(":") || /^\[[^\]]+\]$/.test(segment)) {
+          return Boolean(requestSegments[index]);
+        }
+        return segment === requestSegments[index];
+      });
+
+      if (matched) {
         return route;
       }
     }
@@ -3616,7 +5769,7 @@ function createPaymentResourceServer(options = {}) {
 
 function createPaymentGate(options = {}) {
   const payTo = options.payTo ?? PAY_TO;
-  const routes = options.routes ?? createRouteConfig(payTo);
+  const routes = options.routes ?? applyRouteDiscoveryOverrides(createRouteConfig(payTo));
   const matchRoute = createRouteMatcher(routes);
   const paymentEnv = options.env ?? process.env;
   const hasCustomFacilitatorLoader = typeof options.facilitatorLoader === "function";
@@ -4191,6 +6344,18 @@ function createApiDiscoveryHandler(routes = routeConfig, options = {}) {
       discoveryScope,
     });
 
+    if (shouldRenderHealthHtml(req)) {
+      const flagshipEntries = getFlagshipCatalogEntries(catalog);
+      const html = buildApiDiscoveryHtml({
+        title: metadata.title,
+        description: metadata.description,
+        baseUrl,
+        endpointCount: catalog.length,
+        flagshipEntries,
+      });
+      return res.type("text/html; charset=utf-8").send(html);
+    }
+
     res.json({
       title: metadata.title,
       name: metadata.title,
@@ -4263,11 +6428,12 @@ function buildOpenApiDocument(routes = routeConfig, options = {}) {
   const metadata = getOriginMetadata(env);
   const paths = {};
   const routeEntries = Object.entries(routes)
-    .filter(([routeKey]) => !shouldHideRouteInProduction(routeKey, { env }))
-    .filter(([routeKey]) => shouldIncludeRouteInDiscovery(routeKey, options));
+    .filter(([routeKey, config]) => !shouldHideRouteInProduction(getDisplayRouteKey(routeKey, config), { env }))
+    .filter(([routeKey, config]) => shouldIncludeRouteInDiscovery(getDisplayRouteKey(routeKey, config), options));
 
   for (const [routeKey, config] of routeEntries) {
-    const [method = "GET", routePath = "/"] = String(routeKey).split(" ");
+    const displayRouteKey = getDisplayRouteKey(routeKey, config);
+    const [method = "GET", routePath = "/"] = String(displayRouteKey).split(" ");
     const normalizedMethod = method.toLowerCase();
     const pathTemplate = buildOpenApiPathTemplate(routePath);
     const inputSchema = config?.extensions?.bazaar?.schema?.properties?.input || null;
@@ -4373,6 +6539,17 @@ function createFaviconHandler() {
   };
 }
 
+function createMcpRegistryAuthHandler(proof) {
+  const normalizedProof = typeof proof === "string" ? proof.trim() : "";
+  return function mcpRegistryAuthHandler(_req, res) {
+    if (!normalizedProof) {
+      return res.status(404).type("text/plain").send("");
+    }
+    res.set("Cache-Control", "no-store, max-age=0");
+    return res.type("text/plain").send(normalizedProof);
+  };
+}
+
 function createSimCompatibleResponseMiddleware() {
   return function simCompatibleResponseMiddleware(req, res, next) {
     const originalJson = res.json.bind(res);
@@ -4416,9 +6593,10 @@ function createWellKnownX402AurelianHandler(
 function buildWellKnownX402V1Manifest(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   const resources = Object.entries(routes)
-    .filter(([routeKey]) => !shouldHideRouteInProduction(routeKey, { env }))
-    .map(([routeKey]) => {
-      const [method = "GET", routePath = "/"] = String(routeKey).split(" ");
+    .filter(([routeKey, config]) => !shouldHideRouteInProduction(getDisplayRouteKey(routeKey, config), { env }))
+    .map(([routeKey, config]) => {
+      const displayRouteKey = getDisplayRouteKey(routeKey, config);
+      const [method = "GET", routePath = "/"] = String(displayRouteKey).split(" ");
       return `${String(method).toUpperCase()} ${buildOpenApiPathTemplate(routePath)}`;
     });
 
@@ -4428,10 +6606,49 @@ function buildWellKnownX402V1Manifest(routes = routeConfig, options = {}) {
   };
 }
 
+function buildCoreWellKnownX402Manifest(routes = routeConfig, options = {}) {
+  const env = options.env || process.env;
+  const coreRoutes = selectRoutes(FLAGSHIP_ROUTE_ORDER, routes);
+  const endpoints = buildWellKnownEndpointEntries(coreRoutes, { env });
+  const resources = endpoints
+    .map((endpoint) => {
+      if (endpoint.routeKey === "GET /api/ofac-wallet-screen/:address") {
+        return `${CANONICAL_BASE_URL}/api/ofac-wallet-screen/0x098B716B8Aaf21512996dC57EB0615e2383E2f96?asset=ETH`;
+      }
+
+      return endpoint.path ? `${CANONICAL_BASE_URL}${endpoint.path}` : endpoint.exampleUrl;
+    })
+    .filter(Boolean);
+
+  return buildWellKnownManifest(
+    {
+      ...WELL_KNOWN_X402_AURELIAN,
+      description: "Bundled OFAC wallet screening reports plus separate Monte Carlo decision reports and PDF or DOCX artifact generation.",
+      resources,
+      instructions: [
+        "# AurelianFlo Core Tools",
+        "",
+        "- OFAC wallet screening",
+        "- Monte Carlo decision reports",
+        "- Report PDF generation",
+        "- Report DOCX generation",
+        "",
+        "For the broader machine-readable inventory, use GET /api or /.well-known/x402-aurelian.json.",
+      ].join("\n"),
+    },
+    coreRoutes,
+    {
+      env,
+      includeBundledSellerResources: false,
+      precomputedEndpoints: endpoints,
+    },
+  );
+}
+
 function createWellKnownX402Handler(routes = routeConfig, options = {}) {
   const env = options.env || process.env;
   return function wellKnownX402Handler(_req, res) {
-    res.json(buildWellKnownX402V1Manifest(routes, { env }));
+    res.json(buildCoreWellKnownX402Manifest(routes, { env }));
   };
 }
 
@@ -4513,8 +6730,6 @@ function mountPaidRoutes(target) {
       handler = vendorWorkflowPrimaryHandler;
     } else if (route.seller === "finance-workflows") {
       handler = financeWorkflowPrimaryHandler;
-    } else if (route.handlerId === "batch") {
-      handler = restrictedPartyBatchHandler;
     }
 
     target[method](route.expressPath, handler);
@@ -4573,6 +6788,7 @@ function createApp(options = {}) {
     });
   const enableDebugRoutes = options.enableDebugRoutes ?? true;
   const wellKnownX402Aurelian = options.wellKnownX402Aurelian ?? WELL_KNOWN_X402_AURELIAN;
+  const mcpRegistryAuthProof = options.mcpRegistryAuthProof ?? env.MCP_REGISTRY_AUTH_PROOF;
 
   const app = express();
   const apiDiscoveryHandler = createApiDiscoveryHandler(routes, { env, discoveryScope: "public" });
@@ -4605,6 +6821,9 @@ function createApp(options = {}) {
   app.get("/api/system/openapi.json", fullOpenApiHandler);
   app.get("/favicon.ico", createFaviconHandler());
   app.get("/icon.png", createFaviconHandler());
+  app.get("/mcp/docs", createAurelianFloMcpDocsHandler());
+  app.get("/mcp/privacy", createAurelianFloMcpPrivacyHandler());
+  app.get("/mcp/support", createAurelianFloMcpSupportHandler());
   app.get("/api/sim", createSimLandingHandler(routes, { env }));
   app.get("/.well-known/x402", createWellKnownX402Handler(routes, { env }));
   app.get("/.well-known/x402.json", createWellKnownX402Handler(routes, { env }));
@@ -4614,12 +6833,22 @@ function createApp(options = {}) {
     }
     return res.type("text/plain").send(index402VerificationHash);
   });
+  app.get("/.well-known/mcp-registry-auth", createMcpRegistryAuthHandler(mcpRegistryAuthProof));
   app.get("/well-known/x402-aurelian.json", (_req, res) => {
     res.redirect(308, "/.well-known/x402-aurelian.json");
   });
   app.get(
     "/.well-known/x402-aurelian.json",
     createWellKnownX402AurelianHandler(wellKnownX402Aurelian, routes, { env }),
+  );
+  app.get("/.well-known/mcp/server-card.json", createAurelianFloMcpServerCardHandler());
+  app.all(
+    "/mcp",
+    createAurelianFloMcpExpressBridge({
+      recipient: payTo,
+      facilitatorUrl: options.facilitatorUrl ?? env.X402_FACILITATOR_URL,
+      network: "base",
+    }),
   );
   app.get(
     "/ops/metrics",

@@ -18,3 +18,8 @@ ops-dashboard/payment-retest-*.json
 !**/.env.example
 .vercel
 .env*.local
+outputs/tools/
+outputs/mcp-registry/
+outputs/mcp-registry-auth-key.pem
+outputs/mcp-registry-auth.secret.json
+apps/aurelianflo-mcp/node_modules/

@@ -1,0 +1,36 @@
+{
+  "name": "aurelianflo-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AurelianFlo MCP server for OFAC screening, Monte Carlo decision reports, and document generation.",
+  "homepage": "https://x402.aurelianflo.com/mcp/docs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kelm2021/x402-data-bazaar.git",
+    "directory": "apps/aurelianflo-mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/kelm2021/x402-data-bazaar/issues"
+  },
+  "keywords": [
+    "mcp",
+    "x402",
+    "ofac",
+    "vendor-due-diligence",
+    "monte-carlo",
+    "pdf",
+    "docx",
+    "xlsx"
+  ],
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "x402": "^0.5.3",
+    "x402-mcp": "^0.1.1",
+    "zod": "^3.25.76"
+  }
+}
