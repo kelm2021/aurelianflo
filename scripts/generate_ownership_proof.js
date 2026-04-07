@@ -33,7 +33,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 }
 
 function normalizeOrigin(value) {
-  const fallback = process.env.PUBLIC_BASE_URL || "https://x402.aurelianflo.com";
+  const fallback = process.env.PUBLIC_BASE_URL || "https://x402-data-bazaar.vercel.app";
   const candidate = String(value || fallback).trim();
   if (!candidate) {
     return null;
