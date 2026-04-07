@@ -15,6 +15,13 @@ const {
   WidthType,
 } = require("docx");
 
+function readString(value, fallback = "") {
+  if (value == null) {
+    return fallback;
+  }
+  return String(value);
+}
+
 function sanitizeFileName(value, fallback) {
   return (
     String(value || fallback || "document")
@@ -24,8 +31,185 @@ function sanitizeFileName(value, fallback) {
   );
 }
 
+function decodeHtmlEntities(value) {
+  return readString(value)
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'");
+}
+
+function normalizePlainText(value) {
+  return decodeHtmlEntities(readString(value))
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeSection(section) {
+  if (typeof section === "string") {
+    const body = normalizePlainText(section);
+    return body ? { body } : null;
+  }
+
+  if (!section || typeof section !== "object") {
+    return null;
+  }
+
+  const heading = normalizePlainText(section.heading);
+  const body = normalizePlainText(section.body);
+  const bullets = Array.isArray(section.bullets)
+    ? section.bullets.map((entry) => normalizePlainText(entry)).filter(Boolean)
+    : [];
+  const table = Array.isArray(section.table)
+    ? section.table.filter((entry) => entry && typeof entry === "object")
+    : [];
+
+  if (!heading && !body && bullets.length === 0 && table.length === 0) {
+    return null;
+  }
+
+  return {
+    ...(heading ? { heading } : {}),
+    ...(body ? { body } : {}),
+    ...(bullets.length > 0 ? { bullets } : {}),
+    ...(table.length > 0 ? { table } : {}),
+  };
+}
+
 function readSections(value) {
-  return Array.isArray(value) ? value.filter((entry) => entry && typeof entry === "object") : [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const sections = [];
+  for (const entry of value) {
+    const normalized = normalizeSection(entry);
+    if (normalized) {
+      sections.push(normalized);
+    }
+  }
+  return sections;
+}
+
+function htmlToPlainText(html) {
+  const withLineBreaks = readString(html)
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\s*\/\s*(p|div|section|article|li|h[1-6]|tr)\s*>/gi, "\n")
+    .replace(/<\s*li[^>]*>/gi, "- ")
+    .replace(/<[^>]+>/g, "");
+  return normalizePlainText(withLineBreaks);
+}
+
+function markdownToPlainText(markdown) {
+  const source = normalizePlainText(markdown);
+  if (!source) {
+    return "";
+  }
+
+  return source
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "- ")
+    .replace(/^\s*\d+\.\s+/gm, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\|/g, " ")
+    .replace(/-{3,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function linesToSection(lines, heading) {
+  if (!Array.isArray(lines)) {
+    return null;
+  }
+  const normalizedLines = lines.map((line) => normalizePlainText(line)).filter(Boolean);
+  if (normalizedLines.length === 0) {
+    return null;
+  }
+  return {
+    ...(heading ? { heading } : {}),
+    body: normalizedLines.join("\n"),
+  };
+}
+
+function inferSectionsFromSimpleInputs(payload) {
+  const sections = [];
+  const format = readString(payload.format).toLowerCase();
+  const content = normalizePlainText(payload.content);
+  const markdown = normalizePlainText(payload.markdown);
+  const html = normalizePlainText(payload.html);
+  const text = normalizePlainText(payload.text || payload.note || payload.summary);
+
+  if (markdown) {
+    sections.push({ heading: "Content", body: markdownToPlainText(markdown) });
+  }
+
+  if (html) {
+    sections.push({ heading: "Content", body: htmlToPlainText(html) });
+  }
+
+  if (content) {
+    if (format === "html") {
+      sections.push({ heading: "Content", body: htmlToPlainText(content) });
+    } else if (format === "markdown" || format === "md") {
+      sections.push({ heading: "Content", body: markdownToPlainText(content) });
+    } else {
+      sections.push({ heading: "Content", body: content });
+    }
+  }
+
+  if (text) {
+    sections.push({ heading: "Summary", body: text });
+  }
+
+  const linesSection = linesToSection(payload.lines, "Details");
+  if (linesSection) {
+    sections.push(linesSection);
+  }
+
+  return sections;
+}
+
+function resolveTemplate(value, fallback = "general") {
+  const template = readString(value, fallback).toLowerCase().trim();
+  if (!template) {
+    return fallback;
+  }
+
+  if (template === "premium-report" || template === "report-premium") {
+    return "report";
+  }
+  if (template === "premium-simple" || template === "simple") {
+    return "general";
+  }
+  if (template === "template" || template === "max-fidelity") {
+    return "nda";
+  }
+  return template;
+}
+
+function normalizeDocxPayload(payload = {}, options = {}) {
+  const body = payload && typeof payload === "object" ? payload : {};
+  const template = resolveTemplate(
+    options.template || body.template || (options.mode === "report" ? "report" : "general"),
+  );
+  const sections = readSections(body.sections);
+  const inferredSections = inferSectionsFromSimpleInputs(body);
+
+  return {
+    ...body,
+    title: readString(body.title || "Untitled Document"),
+    template,
+    sections: sections.length > 0 ? sections : inferredSections,
+  };
 }
 
 function buildNda(title, parties = {}, sections = [], company = {}) {
@@ -229,6 +413,205 @@ function buildReport(title, sections = [], metadata = {}) {
   return children;
 }
 
+function normalizeHeadingKey(value) {
+  return readString(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ");
+}
+
+function getSectionByHeading(sections, heading) {
+  const target = normalizeHeadingKey(heading);
+  return (Array.isArray(sections) ? sections : []).find(
+    (section) => normalizeHeadingKey(section && section.heading) === target,
+  ) || null;
+}
+
+function toBooleanLabel(value) {
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  const normalized = readString(value).trim().toLowerCase();
+  if (normalized === "true") return "Yes";
+  if (normalized === "false") return "No";
+  return readString(value);
+}
+
+function chunkLongText(value, chunkSize = 20) {
+  const text = readString(value).trim();
+  if (!text || /\s/.test(text) || text.length <= chunkSize) {
+    return text;
+  }
+
+  const parts = [];
+  for (let index = 0; index < text.length; index += chunkSize) {
+    parts.push(text.slice(index, index + chunkSize));
+  }
+  return parts.join("\n");
+}
+
+function pushBodyParagraphs(children, value, options = {}) {
+  const text = readString(value).trim();
+  if (!text) {
+    return;
+  }
+
+  const paragraphs = text.split("\n").filter(Boolean);
+  for (const paragraph of paragraphs) {
+    children.push(new Paragraph({
+      text: paragraph,
+      spacing: { after: options.after ?? 80 },
+      style: options.style,
+    }));
+  }
+}
+
+function pushLabelValueBlock(children, label, value, options = {}) {
+  const text = readString(value).trim();
+  if (!text) {
+    return;
+  }
+
+  children.push(
+    new Paragraph({
+      text: readString(label),
+      heading: options.headingLevel || HeadingLevel.HEADING_3,
+      spacing: { before: options.before ?? 200, after: 60 },
+    }),
+  );
+  pushBodyParagraphs(children, text, { after: options.after ?? 100 });
+}
+
+function buildOfacWalletScreeningReport(title, sections = [], metadata = {}) {
+  const executiveSummarySection = getSectionByHeading(sections, "Executive Summary") || {};
+  const headlineMetricsSection = getSectionByHeading(sections, "Headline Metrics") || {};
+  const querySection = getSectionByHeading(sections, "Wallet Screening Query") || {};
+  const matchesSection = getSectionByHeading(sections, "Wallet Screening Matches") || {};
+  const freshnessSection = getSectionByHeading(sections, "Source Freshness") || {};
+
+  const metrics = Array.isArray(headlineMetricsSection.table) ? headlineMetricsSection.table : [];
+  const queryRow = Array.isArray(querySection.table) ? querySection.table[0] || {} : {};
+  const matchRow = Array.isArray(matchesSection.table) ? matchesSection.table[0] || {} : {};
+  const freshnessRow = Array.isArray(freshnessSection.table) ? freshnessSection.table[0] || {} : {};
+
+  const screeningStatus = readString(
+    metrics.find((entry) => normalizeHeadingKey(entry.label) === "screening status")?.value
+      || queryRow.status
+      || "unknown",
+  );
+  const matchCount = readString(
+    metrics.find((entry) => normalizeHeadingKey(entry.label) === "match count")?.value
+      || (Array.isArray(matchesSection.table) ? matchesSection.table.length : 0),
+  );
+  const manualReview = toBooleanLabel(
+    metrics.find((entry) => normalizeHeadingKey(entry.label) === "manual review recommended")?.value
+      ?? queryRow.manual_review_recommended,
+  );
+  const primaryEntity = readString(matchRow.entity_name || "").trim();
+  const isMatch = screeningStatus.trim().toLowerCase() === "match";
+  const disposition = isMatch ? "Match" : "Clear";
+  const decisionNote = isMatch
+    ? `Exact OFAC digital currency designation found. ${matchCount} designation${matchCount === "1" ? "" : "s"} matched.${primaryEntity ? ` Primary entity: ${primaryEntity}.` : ""}`
+    : "No exact OFAC wallet designation found in the current Treasury dataset.";
+
+  const children = [
+    new Paragraph({ text: title, heading: HeadingLevel.HEADING_1, spacing: { after: 100 } }),
+  ];
+
+  const metaParts = [];
+  if (metadata.author) metaParts.push(`Author: ${metadata.author}`);
+  if (metadata.date) metaParts.push(`Date: ${metadata.date}`);
+  if (metadata.version) metaParts.push(`Version: ${metadata.version}`);
+
+  if (metaParts.length > 0) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: metaParts.join(" | "), italics: true, color: "888888", size: 18 })],
+        spacing: { after: 260 },
+      }),
+    );
+  }
+
+  children.push(
+    new Paragraph({
+      text: "Screening Decision",
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 120, after: 120 },
+    }),
+  );
+  pushLabelValueBlock(children, "Disposition", disposition, { before: 0 });
+  pushBodyParagraphs(children, decisionNote, { after: 120 });
+  pushLabelValueBlock(children, "Manual Review", manualReview, { before: 120 });
+  pushBodyParagraphs(
+    children,
+    isMatch
+      ? "Do not release or route funds until a compliance reviewer clears the address."
+      : "No exact OFAC wallet hit found. Preserve this memo for audit support.",
+    { after: 140 },
+  );
+
+  children.push(
+    new Paragraph({
+      text: "Wallet Reviewed",
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 160, after: 120 },
+    }),
+  );
+  pushLabelValueBlock(children, "Submitted Address", chunkLongText(queryRow.address), { before: 0 });
+  pushLabelValueBlock(children, "Normalized Address", chunkLongText(queryRow.normalized_address), { before: 120 });
+  pushLabelValueBlock(children, "Asset Filter", readString(queryRow.asset_filter || "All"), { before: 120 });
+
+  if (Array.isArray(executiveSummarySection.bullets) && executiveSummarySection.bullets.length > 0) {
+    children.push(
+      new Paragraph({
+        text: "Executive Summary",
+        heading: HeadingLevel.HEADING_2,
+        spacing: { before: 180, after: 120 },
+      }),
+    );
+    for (const bullet of executiveSummarySection.bullets) {
+      children.push(
+        new Paragraph({
+          text: readString(bullet),
+          bullet: { level: 0 },
+          spacing: { after: 60 },
+        }),
+      );
+    }
+  }
+
+  children.push(
+    new Paragraph({
+      text: "Sanctions Match",
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 180, after: 120 },
+    }),
+  );
+  pushLabelValueBlock(children, "Entity", readString(matchRow.entity_name || "No designation found"), { before: 0 });
+  pushLabelValueBlock(children, "Asset", readString(matchRow.asset || queryRow.asset_filter || ""), { before: 120 });
+  pushLabelValueBlock(children, "Programs", readString(matchRow.programs || ""), { before: 120 });
+  pushLabelValueBlock(children, "List", readString(matchRow.list_name || ""), { before: 120 });
+  pushLabelValueBlock(children, "Listed On", readString(matchRow.listed_on || ""), { before: 120 });
+  pushLabelValueBlock(children, "Sanctioned Address", chunkLongText(matchRow.sanctioned_address || ""), { before: 120 });
+
+  children.push(
+    new Paragraph({
+      text: "Dataset Freshness",
+      heading: HeadingLevel.HEADING_2,
+      spacing: { before: 180, after: 120 },
+    }),
+  );
+  pushLabelValueBlock(children, "Source URL", readString(freshnessRow.source_url || ""), { before: 0 });
+  pushLabelValueBlock(children, "Refreshed At", readString(freshnessRow.refreshed_at || ""), { before: 120 });
+  pushLabelValueBlock(children, "Dataset Published", readString(freshnessRow.dataset_published_at || ""), { before: 120 });
+  pushLabelValueBlock(children, "Address Count", readString(freshnessRow.address_count || ""), { before: 120 });
+  if (freshnessRow.covered_assets) {
+    pushLabelValueBlock(children, "Covered Assets", readString(freshnessRow.covered_assets), { before: 120 });
+  }
+
+  return children;
+}
+
 function buildLetter(title, sections = [], company = {}, parties = {}) {
   const recipient = parties.recipient || {};
   const sender = parties.sender || company || {};
@@ -332,9 +715,10 @@ function buildGeneral(title, sections = []) {
 }
 
 async function generateDocxBuffer(payload = {}) {
-  const title = String(payload.title || "Untitled Document");
-  const template = String(payload.template || "general").toLowerCase();
-  const sections = readSections(payload.sections);
+  const normalizedPayload = normalizeDocxPayload(payload);
+  const title = normalizedPayload.title;
+  const template = normalizedPayload.template;
+  const sections = normalizedPayload.sections;
   const company = payload.company && typeof payload.company === "object" ? payload.company : {};
   const parties = payload.parties && typeof payload.parties === "object" ? payload.parties : {};
   const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
@@ -352,7 +736,7 @@ async function generateDocxBuffer(payload = {}) {
         new Paragraph({
           children: [
             new TextRun({
-              text: [company.address, company.email, company.phone].filter(Boolean).join(" • "),
+              text: [company.address, company.email, company.phone].filter(Boolean).join(" | "),
               size: 16,
               color: "888888",
             }),
@@ -366,7 +750,9 @@ async function generateDocxBuffer(payload = {}) {
   if (template === "nda") {
     children = buildNda(title, parties, sections, company);
   } else if (template === "report") {
-    children = buildReport(title, sections, metadata);
+    children = String(metadata.report_type || "").trim().toLowerCase() === "ofac-wallet-screening"
+      ? buildOfacWalletScreeningReport(title, sections, metadata)
+      : buildReport(title, sections, metadata);
   } else if (template === "letter") {
     children = buildLetter(title, sections, company, parties);
   } else {
@@ -406,7 +792,7 @@ async function generateDocxBuffer(payload = {}) {
                 alignment: AlignmentType.CENTER,
                 children: [
                   new TextRun({
-                    text: `Generated by Meridian Doc-Gen • ${new Date().toISOString().slice(0, 10)}`,
+                    text: `Generated by Meridian Doc-Gen | ${new Date().toISOString().slice(0, 10)}`,
                     size: 14,
                     color: "CCCCCC",
                   }),
@@ -426,6 +812,43 @@ async function generateDocxBuffer(payload = {}) {
   };
 }
 
+async function generatePremiumReportDocxBuffer(payload = {}) {
+  return generateDocxBuffer({
+    ...payload,
+    template: "report",
+  });
+}
+
+async function generatePremiumSimpleDocxBuffer(payload = {}) {
+  return generateDocxBuffer({
+    ...payload,
+    template: "general",
+  });
+}
+
+async function generateTemplateDocxBuffer(payload = {}) {
+  const template = resolveTemplate(payload.template, "");
+  if (!template || template === "general") {
+    throw new Error("template_docx requires a non-general template such as nda, letter, or report");
+  }
+  return generateDocxBuffer({
+    ...payload,
+    template,
+  });
+}
+
+async function generateDocxFromTemplate(template, payload = {}) {
+  return generateTemplateDocxBuffer({
+    ...payload,
+    template,
+  });
+}
+
 module.exports = {
   generateDocxBuffer,
+  generateDocxFromTemplate,
+  generatePremiumReportDocxBuffer,
+  generatePremiumSimpleDocxBuffer,
+  generateTemplateDocxBuffer,
+  normalizeDocxPayload,
 };

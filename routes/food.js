@@ -7,7 +7,7 @@ router.get("/api/food/barcode/:code", async (req, res) => {
     const { code } = req.params;
 
     const resp = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}`, {
-      headers: { "User-Agent": "x402-data-bazaar/1.0 (agent-api)" },
+      headers: { "User-Agent": "aurelianflo/1.0 (agent-api)" },
     });
     const raw = await resp.json();
 

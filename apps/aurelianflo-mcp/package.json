@@ -1,17 +1,17 @@
 {
   "name": "aurelianflo-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
-  "description": "AurelianFlo MCP server for OFAC screening, Monte Carlo decision reports, and document generation.",
+  "description": "AurelianFlo MCP server for EDD memos, OFAC wallet screening, document output, and retained Monte Carlo reports.",
   "homepage": "https://x402.aurelianflo.com/mcp/docs",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kelm2021/x402-data-bazaar.git",
+    "url": "https://github.com/kelm2021/aurelianflo.git",
     "directory": "apps/aurelianflo-mcp"
   },
   "bugs": {
-    "url": "https://github.com/kelm2021/x402-data-bazaar/issues"
+    "url": "https://github.com/kelm2021/aurelianflo/issues"
   },
   "keywords": [
     "mcp",

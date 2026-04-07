@@ -33,8 +33,11 @@ const PAY_TO = sellerConfig.payTo;
 const X402_NETWORK = sellerConfig.network || "eip155:8453";
 const DEFAULT_TIMEOUT_SECONDS = sellerConfig.maxTimeoutSeconds || 60;
 const DEFAULT_402INDEX_VERIFICATION_HASH = "";
-const CANONICAL_BASE_URL =
-  process.env.PUBLIC_BASE_URL || sellerConfig.baseUrl || "https://example.vercel.app";
+const CANONICAL_BASE_URL = String(
+  process.env.PUBLIC_BASE_URL || sellerConfig.baseUrl || "https://example.vercel.app",
+)
+  .trim()
+  .replace(/\/+$/, "");
 
 function buildCanonicalResourceUrl(resourcePath) {
   if (!resourcePath) {
@@ -757,49 +760,66 @@ function createApiDiscoveryHandler(routes = routeConfig) {
 
 function createPaymentsMcpIntegration(routes = routeConfig) {
   const routeEntries = getCanonicalRouteEntries(routes);
-  const primaryRoute = routeEntries[0] ?? null;
+  const eddRoute =
+    routeEntries.find((entry) => entry.path === "/api/workflows/compliance/edd-report") ?? null;
+  const batchRoute =
+    routeEntries.find((entry) => entry.path === "/api/workflows/compliance/batch-wallet-screen") ?? null;
+  const singleWalletRoute =
+    routeEntries.find((entry) => entry.path === "/api/ofac-wallet-screen/:address") ?? null;
+  const primaryRoute = eddRoute ?? batchRoute ?? singleWalletRoute ?? routeEntries[0] ?? null;
   const primaryPrompt = primaryRoute
     ? `Use payments-mcp to pay ${primaryRoute.canonicalUrl} and return the JSON response.`
     : null;
-  const canonicalTemplateUrl =
+  const singleWalletTemplateUrl =
     `${CANONICAL_BASE_URL}/api/ofac-wallet-screen/<WALLET_ADDRESS>?asset=<ASSET>`;
+  const batchTemplateUrl =
+    `${CANONICAL_BASE_URL}/api/workflows/compliance/batch-wallet-screen`;
+  const eddTemplateUrl =
+    `${CANONICAL_BASE_URL}/api/workflows/compliance/edd-report`;
   const scenarioPrompts = [
     {
       id: "smoke-test",
       title: "Smoke Test",
       prompt:
         primaryPrompt ??
-        `Use payments-mcp to pay ${canonicalTemplateUrl} and return the JSON response.`,
+        `Use payments-mcp to pay ${eddTemplateUrl} and return the JSON response.`,
+    },
+    {
+      id: "edd-memo",
+      title: "EDD Memo",
+      prompt:
+        `Use payments-mcp to pay ${eddTemplateUrl}. ` +
+        "Pass case metadata plus the wallet set, then return the memo and summarize the workflow status, evidence summary, and required follow-up.",
     },
     {
       id: "deposit-screen",
       title: "Deposit Screen",
       prompt:
-        `Before crediting funds to a wallet, use payments-mcp to pay ${canonicalTemplateUrl}. ` +
-        "Return the JSON, then tell me whether funds should clear, pause for review, or be blocked.",
+        `Before crediting funds for a wallet set, use payments-mcp to pay ${batchTemplateUrl}. ` +
+        "Return the JSON and identify which wallets require manual review before operations continue.",
     },
     {
       id: "withdrawal-screen",
       title: "Withdrawal Screen",
       prompt:
-        `Before sending funds to a wallet, use payments-mcp to pay ${canonicalTemplateUrl}. ` +
-        "If the response shows a sanctions match, tell me to block payment and escalate.",
+        `Before sending funds to a wallet, use payments-mcp to pay ${singleWalletTemplateUrl}. ` +
+        "Summarize whether the address has an exact OFAC match and whether the case should be escalated to a human reviewer.",
     },
     {
       id: "wallet-check",
       title: "Wallet Check",
       prompt:
-        `Use payments-mcp to pay ${canonicalTemplateUrl}. ` +
-        "Summarize whether the address is on the OFAC SDN digital currency list, which sanctioned entity it maps to, and the relevant program tags.",
+        `Use payments-mcp to pay ${singleWalletTemplateUrl}. ` +
+        "Summarize whether the address is on the OFAC SDN digital currency list, which sanctioned entity it maps to, the relevant program tags, and any required follow-up.",
     },
   ];
   const shareCopy = {
     shortPost:
-      "Built a low-friction x402 OFAC wallet screening seller at restricted-party-screen.vercel.app for onchain deposits, withdrawals, and treasury controls. Exact-match screening, public Treasury data, MCP-ready, and SIWX-enabled for repeat access.",
+      "Built a low-friction x402 compliance seller at x402.aurelianflo.com for EDD memos, batch wallet screening, and exact OFAC wallet checks. Public Treasury data, MCP-ready, and SIWX-enabled for repeat access.",
     developerDm:
-      "If you are building onchain payments, treasury, or exchange controls, I have a live x402 seller for exact OFAC wallet screening. It checks a wallet address against Treasury's SDN digital currency list and returns sanctioned entity metadata in one paid call.",
+      "If you are building onchain payments, treasury, or exchange controls, I have a live x402 seller for enhanced due diligence memos, batch wallet screening, and exact OFAC wallet checks. It turns wallet review into a workflow-safe paid call with evidence and reviewer handoff fields.",
     docsSnippet:
-      "Install Payments MCP, then call the wallet-screening route through MCP. The seller returns exact hit or clear status, sanctioned entity metadata, program tags, source freshness, and a manual-review signal for agent payment workflows.",
+      "Install Payments MCP, then call the EDD memo or wallet-screening routes through MCP. The seller returns exact hit or clear status, source freshness, sanctioned entity metadata, workflow-safe status labels, and reviewer handoff fields for agent payment workflows.",
   };
 
   return {

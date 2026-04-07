@@ -38,21 +38,21 @@ test("tool catalog maps each flagship tool to the live route surface", () => {
     method: "GET",
     pathTemplate: "/api/ofac-wallet-screen/{address}",
   });
-  assert.equal(byName.get("ofac_wallet_screen").price, 0.005);
+  assert.equal(byName.get("ofac_wallet_screen").price, 0.01);
   assert.deepEqual(byName.get("ofac_wallet_screen").required, ["address"]);
 
   assert.deepEqual(byName.get("batch_wallet_screen").route, {
     method: "POST",
     pathTemplate: "/api/workflows/compliance/batch-wallet-screen",
   });
-  assert.equal(byName.get("batch_wallet_screen").price, 0.025);
+  assert.equal(byName.get("batch_wallet_screen").price, 0.1);
   assert.deepEqual(byName.get("batch_wallet_screen").required, ["addresses"]);
 
   assert.deepEqual(byName.get("edd_report").route, {
     method: "POST",
     pathTemplate: "/api/workflows/compliance/edd-report",
   });
-  assert.equal(byName.get("edd_report").price, 0.09);
+  assert.equal(byName.get("edd_report").price, 0.25);
   assert.deepEqual(byName.get("edd_report").required, ["subject_name", "addresses", "output_format"]);
 
   assert.deepEqual(byName.get("monte_carlo_report").route, {
@@ -73,14 +73,14 @@ test("tool catalog maps each flagship tool to the live route surface", () => {
     method: "POST",
     pathTemplate: "/api/tools/report/pdf/generate",
   });
-  assert.equal(byName.get("report_pdf_generate").price, 0.2);
+  assert.equal(byName.get("report_pdf_generate").price, 0.05);
   assert.ok(byName.get("report_pdf_generate").required.includes("report_meta"));
 
   assert.deepEqual(byName.get("report_docx_generate").route, {
     method: "POST",
     pathTemplate: "/api/tools/report/docx/generate",
   });
-  assert.equal(byName.get("report_docx_generate").price, 0.16);
+  assert.equal(byName.get("report_docx_generate").price, 0.06);
   assert.ok(byName.get("report_docx_generate").required.includes("report_meta"));
 });
 

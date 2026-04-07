@@ -1,23 +1,36 @@
-const OFAC_BASE_URL = "https://sanctionslistservice.ofac.treas.gov";
-const OFAC_SEARCH_URL = `${OFAC_BASE_URL}/api/Search/Search`;
-const OFAC_SDN_LIST_URL = `${OFAC_BASE_URL}/api/PublicationPreview/SdnList`;
-const OFAC_CONSOLIDATED_LIST_URL = `${OFAC_BASE_URL}/api/PublicationPreview/ConsolidatedList`;
-const OFAC_DETAILS_URL = "https://sanctionssearch.ofac.treas.gov/Details.aspx?id=";
-const DEFAULT_TIMEOUT_MS = 15_000;
-const DEFAULT_MIN_SCORE = 90;
-const DEFAULT_LIMIT = 5;
-const MAX_LIMIT = 25;
-const DEFAULT_WORKFLOW = "vendor-onboarding";
-const MAX_BATCH_COUNTERPARTIES = 25;
-const BATCH_CONCURRENCY = 4;
-const FRESHNESS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const USER_AGENT =
-  "restricted-party-screen/1.0 (+https://restricted-party-screen.vercel.app)";
+const { Redis } = require("@upstash/redis");
+const { XMLParser } = require("fast-xml-parser");
+const { buildDocumentArtifact } = require("../../../routes/auto-local/doc-artifacts");
+const {
+  buildBatchScreeningArtifactHints,
+  buildBatchScreeningReport,
+  buildEddArtifactHints,
+  buildEddReport,
+  buildWalletScreeningArtifactHints,
+  buildWalletScreeningReport,
+} = require("./report");
 
-const freshnessCache = {
-  expiresAt: 0,
-  value: null,
+const OFAC_SDN_ADVANCED_XML_URL =
+  "https://www.treasury.gov/ofac/downloads/sanctions/1.0/sdn_advanced.xml";
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DATASET_NAMESPACE = "ofac-wallet-screen:v1";
+const DATASET_CACHE_KEY = `${DATASET_NAMESPACE}:dataset`;
+const USER_AGENT =
+  "aurelianflo-compliance/1.0 (+https://x402.aurelianflo.com)";
+const REFRESH_HOUR_UTC = 2;
+const EVM_HEX_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: "",
+  parseTagValue: false,
+  trimValues: true,
+});
+
+const datasetCache = {
   promise: null,
+  value: null,
+  nextRefreshAt: 0,
 };
 
 function createHttpError(message, statusCode = 500) {
@@ -30,195 +43,482 @@ function normalizeString(value) {
   return String(value ?? "").trim();
 }
 
-function normalizeQueryName(value) {
-  return normalizeString(value)
-    .normalize("NFKD")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .toUpperCase();
-}
-
-function splitSemicolonList(value) {
-  return normalizeString(value)
-    .split(";")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-}
-
-function splitQueryValues(value) {
+function asArray(value) {
   if (Array.isArray(value)) {
-    return [...new Set(value.flatMap((entry) => splitQueryValues(entry)).filter(Boolean))];
+    return value;
   }
 
-  return [...new Set(normalizeString(value)
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean))];
+  if (value == null) {
+    return [];
+  }
+
+  return [value];
 }
 
-function clampInteger(value, fallback, minimum, maximum) {
-  const numeric = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(numeric)) {
-    return fallback;
+function textValue(value) {
+  if (typeof value === "string") {
+    return value;
   }
 
-  return Math.min(maximum, Math.max(minimum, numeric));
+  if (value && typeof value === "object") {
+    return normalizeString(value["#text"]);
+  }
+
+  return "";
 }
 
-function splitCounterpartyNames(value) {
-  return [...new Set(normalizeString(value)
-    .split(/[|\n;]/)
-    .map((entry) => normalizeString(entry))
-    .filter(Boolean))];
+function uniqueSorted(values = []) {
+  return [...new Set(values.filter(Boolean))].sort((left, right) =>
+    String(left).localeCompare(String(right)),
+  );
 }
 
-function computeMatchConfidence(bestNameScore) {
-  if (bestNameScore >= 100) {
-    return "exact";
-  }
-
-  if (bestNameScore >= 95) {
-    return "high";
-  }
-
-  if (bestNameScore >= 90) {
-    return "medium";
-  }
-
-  return "low";
+function normalizeAsset(asset) {
+  return normalizeString(asset).toUpperCase();
 }
 
-function sortGroupedMatches(left, right) {
-  if (right.bestNameScore !== left.bestNameScore) {
-    return right.bestNameScore - left.bestNameScore;
-  }
-
-  if (right.aliases.length !== left.aliases.length) {
-    return right.aliases.length - left.aliases.length;
-  }
-
-  return left.primaryName.localeCompare(right.primaryName);
-}
-
-function choosePrimaryName(names, normalizedRequestedName, fallbackName = "") {
-  if (!names.length) {
+function normalizeWalletAddress(address) {
+  const normalized = normalizeString(address);
+  if (!normalized) {
     return "";
   }
 
-  const exactCandidates = names.filter(
-    (entry) => normalizeQueryName(entry) === normalizedRequestedName,
+  if (EVM_HEX_ADDRESS_PATTERN.test(normalized)) {
+    return normalized.toLowerCase();
+  }
+
+  return normalized;
+}
+
+function buildIsoDate(dateNode) {
+  if (!dateNode || typeof dateNode !== "object") {
+    return null;
+  }
+
+  const year = Number.parseInt(normalizeString(dateNode.Year), 10);
+  const month = Number.parseInt(normalizeString(dateNode.Month), 10);
+  const day = Number.parseInt(normalizeString(dateNode.Day), 10);
+  if (!Number.isFinite(year)) {
+    return null;
+  }
+
+  const monthPart = Number.isFinite(month) ? String(month).padStart(2, "0") : "01";
+  const dayPart = Number.isFinite(day) ? String(day).padStart(2, "0") : "01";
+  return `${year}-${monthPart}-${dayPart}`;
+}
+
+function createRedisClient(options = {}) {
+  const env = options.env ?? process.env;
+  const url = options.url ?? env.KV_REST_API_URL ?? null;
+  const token = options.token ?? env.KV_REST_API_TOKEN ?? null;
+
+  if (!url || !token) {
+    return null;
+  }
+
+  return new Redis({
+    url,
+    token,
+    enableTelemetry: false,
+  });
+}
+
+function buildAssetMap(root) {
+  const featureTypes = asArray(
+    root?.ReferenceValueSets?.FeatureTypeValues?.FeatureType,
+  );
+  const featureTypeById = new Map();
+
+  for (const featureType of featureTypes) {
+    const id = normalizeString(featureType?.ID);
+    const label = textValue(featureType);
+    if (!id || !label.startsWith("Digital Currency Address - ")) {
+      continue;
+    }
+    featureTypeById.set(id, normalizeAsset(label.replace("Digital Currency Address - ", "")));
+  }
+
+  return featureTypeById;
+}
+
+function buildListNameMap(root) {
+  const lists = asArray(root?.ReferenceValueSets?.ListValues?.List);
+  return new Map(
+    lists
+      .map((entry) => [normalizeString(entry?.ID), textValue(entry)])
+      .filter(([id, label]) => id && label),
+  );
+}
+
+function buildSanctionsTypeMap(root) {
+  const types = asArray(root?.ReferenceValueSets?.SanctionsTypeValues?.SanctionsType);
+  return new Map(
+    types
+      .map((entry) => [normalizeString(entry?.ID), textValue(entry)])
+      .filter(([id, label]) => id && label),
+  );
+}
+
+function getAliasNames(identity) {
+  const aliases = asArray(identity?.Alias);
+  const aliasEntries = aliases
+    .map((alias) => ({
+      name: normalizeString(
+        textValue(alias?.DocumentedName?.DocumentedNamePart?.NamePartValue),
+      ),
+      primary: normalizeString(alias?.Primary).toLowerCase() === "true",
+    }))
+    .filter((entry) => entry.name);
+
+  const primaryAlias =
+    aliasEntries.find((entry) => entry.primary)?.name ?? aliasEntries[0]?.name ?? "";
+  const alternateAliases = uniqueSorted(
+    aliasEntries.map((entry) => entry.name).filter((name) => name !== primaryAlias),
   );
 
-  if (exactCandidates.length) {
-    return [...exactCandidates].sort((left, right) => left.length - right.length)[0];
-  }
-
-  if (fallbackName && names.includes(fallbackName)) {
-    return fallbackName;
-  }
-
-  return [...names].sort((left, right) => left.length - right.length)[0];
+  return {
+    entityName: primaryAlias,
+    aliases: alternateAliases,
+  };
 }
 
-function groupMatches(rawMatches, requestedName) {
-  const matches = Array.isArray(rawMatches) ? rawMatches : [];
-  const normalizedRequestedName = normalizeQueryName(requestedName);
-  const grouped = new Map();
+function buildSanctionsEntryMap(root, listNamesById, sanctionsTypeById) {
+  const entries = asArray(root?.SanctionsEntries?.SanctionsEntry);
+  const sanctionsEntryByProfileId = new Map();
 
-  for (const match of matches) {
-    const id = Number(match.id);
-    const key = Number.isFinite(id) ? String(id) : `${match.name}:${match.address}:${match.type}`;
-    const existing =
-      grouped.get(key) ??
+  for (const entry of entries) {
+    const profileId = normalizeString(entry?.ProfileID || entry?.ID);
+    if (!profileId) {
+      continue;
+    }
+
+    const measures = asArray(entry?.SanctionsMeasure);
+    const measureNames = uniqueSorted(
+      measures
+        .map((measure) => sanctionsTypeById.get(normalizeString(measure?.SanctionsTypeID)))
+        .filter(Boolean),
+    );
+    const programs = uniqueSorted(
+      measures
+        .filter(
+          (measure) =>
+            sanctionsTypeById.get(normalizeString(measure?.SanctionsTypeID)) === "Program",
+        )
+        .map((measure) => normalizeString(measure?.Comment))
+        .filter(Boolean),
+    );
+
+    sanctionsEntryByProfileId.set(profileId, {
+      entryId: normalizeString(entry?.ID),
+      listName: listNamesById.get(normalizeString(entry?.ListID)) || "SDN List",
+      listedOn: buildIsoDate(entry?.EntryEvent?.Date),
+      measures: measureNames,
+      programs,
+    });
+  }
+
+  return sanctionsEntryByProfileId;
+}
+
+function buildAddressIndex(entries) {
+  const byAddress = {};
+
+  for (const entry of entries) {
+    const key = entry.normalizedAddress;
+    if (!byAddress[key]) {
+      byAddress[key] = [];
+    }
+    byAddress[key].push(entry);
+  }
+
+  return byAddress;
+}
+
+function extractWalletDatasetFromXml(xmlText) {
+  const normalizedXml = normalizeString(xmlText);
+  if (!normalizedXml) {
+    throw createHttpError("OFAC wallet dataset XML is empty.", 502);
+  }
+
+  const parsed = parser.parse(normalizedXml);
+  const root = parsed?.SanctionsData || parsed?.Sanctions;
+  if (!root) {
+    throw createHttpError("OFAC wallet dataset XML could not be parsed.", 502);
+  }
+
+  const featureTypeById = buildAssetMap(root);
+  const listNamesById = buildListNameMap(root);
+  const sanctionsTypeById = buildSanctionsTypeMap(root);
+  const sanctionsEntryByProfileId = buildSanctionsEntryMap(
+    root,
+    listNamesById,
+    sanctionsTypeById,
+  );
+
+  const distinctParties = asArray(root?.DistinctParties?.DistinctParty);
+  const dedupedEntries = new Map();
+
+  for (const party of distinctParties) {
+    const profile = party?.Profile || null;
+    const profileId = normalizeString(profile?.ID || party?.FixedRef);
+    const identity = profile?.Identity || null;
+    const identityId = normalizeString(identity?.ID);
+    const nameInfo = getAliasNames(identity);
+    const sanctionsInfo =
+      sanctionsEntryByProfileId.get(profileId) ||
+      sanctionsEntryByProfileId.get(normalizeString(party?.FixedRef)) ||
       {
-        id: Number.isFinite(id) ? id : null,
-        names: new Set(),
-        addresses: new Set(),
-        programs: new Set(),
-        lists: new Set(),
-        firstSeenName: "",
-        type: normalizeString(match.type) || "Unknown",
-        bestNameScore: 0,
+        entryId: profileId || identityId || null,
+        listName: "SDN List",
+        listedOn: null,
+        measures: [],
+        programs: [],
       };
 
-    const name = normalizeString(match.name);
-    const address = normalizeString(match.address);
-    if (name) {
-      if (!existing.firstSeenName) {
-        existing.firstSeenName = name;
+    const features = [
+      ...asArray(profile?.Feature),
+      ...asArray(party?.Feature),
+    ];
+
+    for (const feature of features) {
+      const asset = featureTypeById.get(normalizeString(feature?.FeatureTypeID));
+      if (!asset) {
+        continue;
       }
-      existing.names.add(name);
-    }
-    if (address) {
-      existing.addresses.add(address);
-    }
 
-    for (const program of splitSemicolonList(match.programs)) {
-      existing.programs.add(program);
-    }
+      const address = normalizeString(textValue(feature?.FeatureVersion?.VersionDetail));
+      const normalizedAddress = normalizeWalletAddress(address);
+      if (!normalizedAddress) {
+        continue;
+      }
 
-    for (const listName of splitSemicolonList(match.lists)) {
-      existing.lists.add(listName);
-    }
+      const entry = {
+        entryId: sanctionsInfo.entryId,
+        profileId,
+        identityId,
+        entityName: nameInfo.entityName || "Unknown sanctioned party",
+        aliases: nameInfo.aliases,
+        asset,
+        address,
+        normalizedAddress,
+        listName: sanctionsInfo.listName,
+        listedOn: sanctionsInfo.listedOn,
+        measures: sanctionsInfo.measures,
+        programs: sanctionsInfo.programs,
+        sourceType: `Digital Currency Address - ${asset}`,
+      };
 
-    const nameScore = Number(match.nameScore);
-    if (Number.isFinite(nameScore)) {
-      existing.bestNameScore = Math.max(existing.bestNameScore, nameScore);
+      dedupedEntries.set(`${normalizedAddress}:${asset}:${profileId}`, entry);
     }
-
-    grouped.set(key, existing);
   }
 
-  return [...grouped.values()]
-    .map((entry) => {
-      const names = [...entry.names];
-      const primaryName = choosePrimaryName(
-        names,
-        normalizedRequestedName,
-        entry.firstSeenName,
-      );
-      const aliases = names
-        .filter((name) => name !== primaryName)
-        .sort((left, right) => left.localeCompare(right));
-      const exactNameMatch = names.some(
-        (name) => normalizeQueryName(name) === normalizedRequestedName,
-      );
+  const entries = [...dedupedEntries.values()].sort((left, right) => {
+    if (left.normalizedAddress !== right.normalizedAddress) {
+      return left.normalizedAddress.localeCompare(right.normalizedAddress);
+    }
+    if (left.asset !== right.asset) {
+      return left.asset.localeCompare(right.asset);
+    }
+    return left.entityName.localeCompare(right.entityName);
+  });
 
-      return {
-        id: entry.id,
-        primaryName,
-        aliases,
-        type: entry.type,
-        programs: [...entry.programs].sort((left, right) => left.localeCompare(right)),
-        lists: [...entry.lists].sort((left, right) => left.localeCompare(right)),
-        addresses: [...entry.addresses].sort((left, right) => left.localeCompare(right)),
-        bestNameScore: entry.bestNameScore,
-        matchConfidence: computeMatchConfidence(entry.bestNameScore),
-        exactNameMatch,
-        manualReviewRecommended: true,
-        detailUrl: entry.id == null ? null : `${OFAC_DETAILS_URL}${entry.id}`,
-      };
-    })
-    .sort(sortGroupedMatches);
+  const uniqueAddresses = new Set(entries.map((entry) => entry.normalizedAddress));
+  const coveredAssets = uniqueSorted(entries.map((entry) => entry.asset));
+
+  return {
+    sourceUrl: OFAC_SDN_ADVANCED_XML_URL,
+    addressCount: uniqueAddresses.size,
+    coveredAssets,
+    entries,
+    byAddress: buildAddressIndex(entries),
+  };
 }
 
-function getLatestLastUpdated(entries = []) {
-  const sourceEntries = Array.isArray(entries) ? entries : [];
-  return sourceEntries.reduce((latest, entry) => {
-    const candidate = normalizeString(entry.lastUpdated);
-    if (!candidate) {
-      return latest;
-    }
+function screenWalletAddress(dataset, query) {
+  if (!dataset || !Array.isArray(dataset.entries)) {
+    throw createHttpError("Wallet sanctions dataset is unavailable.", 503);
+  }
 
-    if (!latest) {
-      return candidate;
-    }
+  const address = normalizeString(query?.address);
+  if (!address) {
+    throw createHttpError("A wallet address is required.", 400);
+  }
 
-    return Date.parse(candidate) > Date.parse(latest) ? candidate : latest;
-  }, null);
+  const normalizedAddress = normalizeWalletAddress(address);
+  const asset = normalizeAsset(query?.asset);
+  const matches = asArray(dataset.byAddress?.[normalizedAddress])
+    .filter((entry) => !asset || entry.asset === asset)
+    .sort((left, right) => {
+      if (left.asset !== right.asset) {
+        return left.asset.localeCompare(right.asset);
+      }
+      return left.entityName.localeCompare(right.entityName);
+    });
+
+  return {
+    query: {
+      address,
+      normalizedAddress,
+      ...(asset ? { asset } : {}),
+    },
+    summary: {
+      status: matches.length ? "match" : "clear",
+      matchCount: matches.length,
+      exactAddressMatch: matches.length > 0,
+      manualReviewRecommended: matches.length > 0,
+    },
+    matches,
+  };
 }
 
-async function fetchJson(url, options = {}) {
+function screenWalletAddressesBatch(dataset, query) {
+  if (!dataset || !Array.isArray(dataset.entries)) {
+    throw createHttpError("Wallet sanctions dataset is unavailable.", 503);
+  }
+
+  const addresses = Array.isArray(query?.addresses)
+    ? query.addresses.map((address) => normalizeString(address)).filter(Boolean)
+    : [];
+
+  if (!addresses.length) {
+    throw createHttpError("At least one wallet address is required.", 400);
+  }
+
+  if (addresses.length > 100) {
+    throw createHttpError("Batch wallet screening supports up to 100 wallet addresses per request.", 400);
+  }
+
+  const asset = normalizeAsset(query?.asset);
+  const results = addresses.map((address) =>
+    screenWalletAddress(dataset, {
+      address,
+      ...(asset ? { asset } : {}),
+    }),
+  );
+  const matchCount = results.filter((result) => result.summary?.status === "match").length;
+  const totalScreened = results.length;
+  const clearCount = totalScreened - matchCount;
+
+  return {
+    query: {
+      addresses,
+      normalizedAddresses: results.map((result) => result.query.normalizedAddress),
+      ...(asset ? { asset } : {}),
+    },
+    summary: {
+      totalScreened,
+      matchCount,
+      clearCount,
+      manualReviewRecommended: matchCount > 0,
+      workflowStatus:
+        matchCount > 0 ? "manual_review_required" : "screening_complete_no_exact_match",
+    },
+    results,
+  };
+}
+
+function buildScreeningResponse(screening, freshness) {
+  const report = buildWalletScreeningReport(screening, freshness);
+  const artifacts = buildWalletScreeningArtifactHints(report);
+
+  return {
+    success: true,
+    data: {
+      ...screening,
+      sourceFreshness: freshness,
+      screeningOnly: true,
+      note:
+        "This API screens exact wallet addresses against OFAC SDN digital currency address designations only. Hits require human compliance review before blocking or releasing funds.",
+    },
+    report,
+    artifacts,
+    source: "OFAC SDN Advanced XML",
+  };
+}
+
+function buildBatchScreeningResponse(batch, freshness) {
+  const report = buildBatchScreeningReport(batch, freshness);
+  const artifacts = buildBatchScreeningArtifactHints(report);
+
+  return {
+    success: true,
+    data: {
+      ...batch,
+      sourceFreshness: freshness,
+      screeningOnly: true,
+      note:
+        "This API screens exact wallet addresses against OFAC SDN digital currency address designations only. Any hit requires human compliance review before clearing onboarding or funds movement.",
+    },
+    report,
+    artifacts,
+    source: "OFAC SDN Advanced XML",
+  };
+}
+
+function buildEddResponse(caseContext, batch, freshness) {
+  const report = buildEddReport(caseContext, batch, freshness);
+  const artifacts = buildEddArtifactHints(report);
+
+  return {
+    success: true,
+    data: {
+      case: report.result.case || caseContext,
+      workflowStatus: report.result.workflowStatus,
+      evidenceSummary: Array.isArray(report.result.evidenceSummary)
+        ? report.result.evidenceSummary
+        : [],
+      requiredFollowUp: Array.isArray(report.result.requiredFollowUp)
+        ? report.result.requiredFollowUp
+        : [],
+      screening: {
+        ...batch,
+        sourceFreshness: freshness,
+      },
+      note:
+        "This memo supports human compliance review and audit workflows. It does not provide legal advice or a final compliance determination.",
+    },
+    report,
+    artifacts,
+    source: "OFAC SDN Advanced XML",
+  };
+}
+
+async function buildBundledEddResponse(caseContext, batch, freshness, outputFormat) {
+  const bundled = buildEddResponse(caseContext, batch, freshness);
+  const normalizedFormat = normalizeString(outputFormat).toLowerCase();
+
+  if (!normalizedFormat || normalizedFormat === "json") {
+    return bundled;
+  }
+
+  const artifactPath =
+    normalizedFormat === "docx"
+      ? "/api/tools/report/docx/generate"
+      : "/api/tools/report/pdf/generate";
+  const artifactPayload = await buildDocumentArtifact({
+    path: artifactPath,
+    endpoint: `POST ${artifactPath}`,
+    title: bundled.report?.report_meta?.title || "Enhanced Due Diligence Memo",
+    body: bundled.report,
+  });
+
+  return {
+    ...bundled,
+    output_format: normalizedFormat,
+    output: artifactPayload.data,
+  };
+}
+
+function getNextRefreshTimestamp(fromDate = new Date()) {
+  const next = new Date(fromDate);
+  next.setUTCHours(REFRESH_HOUR_UTC, 0, 0, 0);
+  if (next.getTime() <= fromDate.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next.getTime();
+}
+
+async function fetchText(url, options = {}) {
   if (typeof fetch !== "function") {
     throw new Error("Global fetch is unavailable in this runtime.");
   }
@@ -229,45 +529,36 @@ async function fetchJson(url, options = {}) {
 
   try {
     const response = await fetch(url, {
-      method: options.method ?? "GET",
+      method: "GET",
       headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
+        Accept: "application/xml,text/xml;q=0.9,*/*;q=0.1",
         "User-Agent": USER_AGENT,
         ...(options.headers ?? {}),
       },
-      body: options.body == null ? undefined : JSON.stringify(options.body),
       signal: controller.signal,
     });
     const text = await response.text();
 
-    let parsed;
-    try {
-      parsed = text ? JSON.parse(text) : null;
-    } catch (error) {
-      parsed = text;
-    }
-
     if (!response.ok) {
-      const message =
-        parsed?.errorMessage ??
-        parsed?.message ??
-        `OFAC request failed with status ${response.status}`;
-      throw createHttpError(message, 502);
+      throw createHttpError(
+        `OFAC wallet dataset request failed with status ${response.status}`,
+        502,
+      );
     }
 
-    return parsed;
+    return {
+      text,
+      lastModified: normalizeString(response.headers?.get?.("last-modified")) || null,
+    };
   } catch (error) {
     if (error.name === "AbortError") {
-      throw createHttpError("OFAC request timed out.", 504);
+      throw createHttpError("OFAC wallet dataset request timed out.", 504);
     }
-
     if (error.statusCode) {
       throw error;
     }
-
     throw createHttpError(
-      `OFAC request failed: ${error.message || "Unknown upstream error"}`,
+      `OFAC wallet dataset request failed: ${error.message || "Unknown upstream error"}`,
       502,
     );
   } finally {
@@ -275,246 +566,118 @@ async function fetchJson(url, options = {}) {
   }
 }
 
-async function fetchSearchResults(query) {
-  const requestedCountry = normalizeString(query.country).toUpperCase();
-  const primaryBody = {
-    name: query.name,
-    city: query.city ?? "",
-    idNumber: query.idNumber ?? "",
-    stateProvince: query.stateProvince ?? "",
-    nameScore: query.minScore,
-    country: requestedCountry,
-    programs: query.programs ?? [],
-    type: query.type ?? "",
-    address: query.address ?? "",
-    list: query.list ?? "",
+function hydrateCachedDataset(payload) {
+  if (!payload || !Array.isArray(payload.entries)) {
+    return null;
+  }
+
+  return {
+    sourceUrl: payload.sourceUrl || OFAC_SDN_ADVANCED_XML_URL,
+    addressCount: payload.addressCount ?? new Set(payload.entries.map((entry) => entry.normalizedAddress)).size,
+    coveredAssets: Array.isArray(payload.coveredAssets) ? payload.coveredAssets : uniqueSorted(payload.entries.map((entry) => entry.asset)),
+    entries: payload.entries,
+    byAddress: payload.byAddress || buildAddressIndex(payload.entries),
+    refreshedAt: payload.refreshedAt || null,
+    datasetPublishedAt: payload.datasetPublishedAt || null,
   };
-  const primaryResults = await fetchJson(OFAC_SEARCH_URL, {
-    method: "POST",
-    body: primaryBody,
-  });
-
-  if (!requestedCountry) {
-    return Array.isArray(primaryResults) ? primaryResults : [];
-  }
-
-  if (Array.isArray(primaryResults) && primaryResults.length > 0) {
-    return primaryResults;
-  }
-
-  const fallbackResults = await fetchJson(OFAC_SEARCH_URL, {
-    method: "POST",
-    body: {
-      ...primaryBody,
-      country: "",
-    },
-  });
-
-  if (Array.isArray(fallbackResults) && fallbackResults.length > 0) {
-    return fallbackResults;
-  }
-
-  return Array.isArray(primaryResults) ? primaryResults : [];
 }
 
-async function fetchSourceFreshness(options = {}) {
+async function fetchWalletDataset(options = {}) {
+  const { text, lastModified } = await fetchText(
+    options.url || OFAC_SDN_ADVANCED_XML_URL,
+    options,
+  );
+  const dataset = extractWalletDatasetFromXml(text);
+  const refreshedAt = new Date().toISOString();
+  return hydrateCachedDataset({
+    ...dataset,
+    refreshedAt,
+    datasetPublishedAt: lastModified ? new Date(lastModified).toISOString() : refreshedAt,
+  });
+}
+
+async function loadWalletDataset(options = {}) {
   const now = Date.now();
-  if (freshnessCache.value && freshnessCache.expiresAt > now) {
-    return freshnessCache.value;
+  if (datasetCache.value && datasetCache.nextRefreshAt > now) {
+    return datasetCache.value;
   }
 
-  if (!options.forceRefresh && freshnessCache.promise) {
-    return freshnessCache.promise;
+  if (datasetCache.promise) {
+    return datasetCache.promise;
   }
 
-  freshnessCache.promise = Promise.all([
-    fetchJson(OFAC_SDN_LIST_URL, { method: "POST", body: null }),
-    fetchJson(OFAC_CONSOLIDATED_LIST_URL, { method: "POST", body: null }),
-  ])
-    .then(([sdnEntries, consolidatedEntries]) => {
-      const value = {
-        sdnLastUpdated: getLatestLastUpdated(sdnEntries),
-        consolidatedLastUpdated: getLatestLastUpdated(consolidatedEntries),
-      };
-
-      freshnessCache.value = value;
-      freshnessCache.expiresAt = Date.now() + FRESHNESS_CACHE_TTL_MS;
-      freshnessCache.promise = null;
-      return value;
-    })
-    .catch((error) => {
-      freshnessCache.promise = null;
-      throw error;
-    });
-
-  return freshnessCache.promise;
-}
-
-function buildScreeningData(query, rawMatches) {
-  const normalizedMatches = Array.isArray(rawMatches) ? rawMatches : [];
-  const groupedMatches = groupMatches(normalizedMatches, query.name).slice(0, query.limit);
-  const exactMatchCount = groupedMatches.filter((match) => match.exactNameMatch).length;
-
-  return {
-    query: {
-      name: query.name,
-      minScore: query.minScore,
-      limit: query.limit,
-      ...(query.type ? { type: query.type } : {}),
-      ...(query.country ? { country: query.country } : {}),
-      ...(query.programs?.length ? { programs: query.programs } : {}),
-      ...(query.list ? { list: query.list } : {}),
-    },
-    summary: {
-      status: groupedMatches.length ? "potential-match" : "no-potential-match",
-      rawResultCount: normalizedMatches.length,
-      matchCount: groupedMatches.length,
-      exactMatchCount,
-      manualReviewRecommended: groupedMatches.length > 0,
-    },
-    matches: groupedMatches,
-  };
-}
-
-function buildScreeningResponse(query, rawMatches, freshness) {
-  return {
-    success: true,
-    data: {
-      ...buildScreeningData(query, rawMatches),
-      sourceFreshness: freshness,
-      screeningOnly: true,
-      note:
-        "This API provides OFAC screening support only. Potential matches require human review before any compliance decision.",
-    },
-    source: "OFAC Sanctions List Service",
-  };
-}
-
-async function mapWithConcurrency(items, concurrency, worker) {
-  const results = new Array(items.length);
-  let nextIndex = 0;
-
-  async function runWorker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+  datasetCache.promise = (async () => {
+    const redis = options.redis === undefined ? createRedisClient(options) : options.redis;
+    if (redis) {
+      const cachedPayload = await redis.get(DATASET_CACHE_KEY);
+      const cachedDataset = hydrateCachedDataset(cachedPayload);
+      if (cachedDataset) {
+        const refreshedAt = Date.parse(cachedDataset.refreshedAt || "");
+        const nextRefreshAt = Number.isFinite(refreshedAt)
+          ? getNextRefreshTimestamp(new Date(refreshedAt))
+          : 0;
+        if (nextRefreshAt > now) {
+          datasetCache.value = cachedDataset;
+          datasetCache.nextRefreshAt = nextRefreshAt;
+          datasetCache.promise = null;
+          return cachedDataset;
+        }
+      }
     }
-  }
 
-  const workerCount = Math.max(1, Math.min(concurrency, items.length));
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-  return results;
-}
+    const dataset = await fetchWalletDataset(options);
+    datasetCache.value = dataset;
+    datasetCache.nextRefreshAt = getNextRefreshTimestamp(new Date());
 
-async function fetchBatchSearchResults(queries, options = {}) {
-  return mapWithConcurrency(
-    queries,
-    options.concurrency ?? BATCH_CONCURRENCY,
-    (query) => fetchSearchResults(query),
-  );
-}
+    if (redis) {
+      await redis.set(DATASET_CACHE_KEY, dataset, {
+        ex: 60 * 60 * 36,
+      });
+    }
 
-function buildBatchScreeningResponse(batchQuery, rawMatchesByCounterparty, freshness) {
-  const counterparties = rawMatchesByCounterparty.map(({ name, rawMatches }) => {
-    const screening = buildScreeningData(
-      {
-        name,
-        minScore: batchQuery.minScore,
-        limit: batchQuery.limit,
-        type: batchQuery.type,
-        country: batchQuery.country,
-        programs: batchQuery.programs,
-        list: batchQuery.list,
-      },
-      rawMatches,
-    );
-
-    return {
-      name,
-      summary: screening.summary,
-      matches: screening.matches,
-      topMatch: screening.matches[0] ?? null,
-    };
+    datasetCache.promise = null;
+    return dataset;
+  })().catch((error) => {
+    datasetCache.promise = null;
+    throw error;
   });
 
-  const flaggedCounterparties = counterparties.filter(
-    (entry) => entry.summary.manualReviewRecommended,
-  );
-  const clearCounterparties = counterparties.filter(
-    (entry) => !entry.summary.manualReviewRecommended,
-  );
+  return datasetCache.promise;
+}
 
+function buildSourceFreshness(dataset) {
   return {
-    success: true,
-    data: {
-      workflow: batchQuery.workflow,
-      query: {
-        names: batchQuery.names,
-        screenedCount: batchQuery.names.length,
-        minScore: batchQuery.minScore,
-        limit: batchQuery.limit,
-        ...(batchQuery.type ? { type: batchQuery.type } : {}),
-        ...(batchQuery.country ? { country: batchQuery.country } : {}),
-        ...(batchQuery.programs?.length ? { programs: batchQuery.programs } : {}),
-        ...(batchQuery.list ? { list: batchQuery.list } : {}),
-      },
-      summary: {
-        status: flaggedCounterparties.length ? "manual-review-required" : "clear-to-proceed",
-        screenedCount: counterparties.length,
-        flaggedCount: flaggedCounterparties.length,
-        clearCount: clearCounterparties.length,
-        manualReviewRecommended: flaggedCounterparties.length > 0,
-        recommendedAction: flaggedCounterparties.length ? "pause-and-review" : "proceed",
-      },
-      counterparties,
-      flaggedCounterparties: flaggedCounterparties.map((entry) => ({
-        name: entry.name,
-        topMatch: entry.topMatch,
-        matchCount: entry.summary.matchCount,
-      })),
-      sourceFreshness: freshness,
-      screeningOnly: true,
-      note:
-        "This API provides OFAC screening support only. Potential matches require human review before any compliance decision.",
-    },
-    source: "OFAC Sanctions List Service",
+    sourceUrl: dataset?.sourceUrl || OFAC_SDN_ADVANCED_XML_URL,
+    refreshedAt: dataset?.refreshedAt || null,
+    datasetPublishedAt: dataset?.datasetPublishedAt || null,
+    addressCount: dataset?.addressCount ?? 0,
+    coveredAssets: Array.isArray(dataset?.coveredAssets) ? dataset.coveredAssets : [],
   };
 }
 
-function resetFreshnessCache() {
-  freshnessCache.expiresAt = 0;
-  freshnessCache.value = null;
-  freshnessCache.promise = null;
+function resetDatasetCache() {
+  datasetCache.promise = null;
+  datasetCache.value = null;
+  datasetCache.nextRefreshAt = 0;
 }
 
 module.exports = {
-  BATCH_CONCURRENCY,
-  DEFAULT_LIMIT,
-  DEFAULT_MIN_SCORE,
-  DEFAULT_WORKFLOW,
-  MAX_BATCH_COUNTERPARTIES,
-  MAX_LIMIT,
-  OFAC_CONSOLIDATED_LIST_URL,
-  OFAC_DETAILS_URL,
-  OFAC_SDN_LIST_URL,
-  OFAC_SEARCH_URL,
+  DATASET_CACHE_KEY,
+  OFAC_SDN_ADVANCED_XML_URL,
   USER_AGENT,
   buildBatchScreeningResponse,
-  buildScreeningData,
+  buildEddResponse,
+  buildBundledEddResponse,
   buildScreeningResponse,
-  clampInteger,
+  buildSourceFreshness,
   createHttpError,
-  fetchBatchSearchResults,
-  fetchSearchResults,
-  fetchSourceFreshness,
-  getLatestLastUpdated,
-  groupMatches,
-  mapWithConcurrency,
-  normalizeQueryName,
+  extractWalletDatasetFromXml,
+  fetchWalletDataset,
+  loadWalletDataset,
+  normalizeAsset,
   normalizeString,
-  resetFreshnessCache,
-  splitCounterpartyNames,
-  splitQueryValues,
-  splitSemicolonList,
+  normalizeWalletAddress,
+  resetDatasetCache,
+  screenWalletAddressesBatch,
+  screenWalletAddress,
 };

@@ -747,7 +747,7 @@ function createPaymentsMcpIntegration(routes = routeConfig) {
     ],
     shareCopy: {
       shortPost:
-        "Built a vendor-entity-brief add-on at vendor-entity-brief.vercel.app for teams that need a short handoff artifact after a restricted-party screen. It resolves legal entities through GLEIF, layers in OFAC screening, and is ready to call through Payments MCP.",
+        "Built a vendor due-diligence add-on at x402.aurelianflo.com for teams that need a short handoff artifact after a restricted-party screen. It resolves legal entities through GLEIF, layers in OFAC screening, and is ready to call through Payments MCP.",
       developerDm:
         "If you are building procurement, AP, or cross-border onboarding agents, I have a live x402 vendor entity brief that combines GLEIF entity records with OFAC screening in one paid call. It works best as the follow-on step when a buyer needs a compact summary, not as the first-pass gate.",
       docsSnippet:

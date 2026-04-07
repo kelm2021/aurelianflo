@@ -2,12 +2,12 @@
 
 ## Description
 
-AurelianFlo is a remote MCP server for compliance screening, vendor due diligence, Monte Carlo decision analysis, and formatted document output for AI agents.
+AurelianFlo is a remote MCP server anchored around enhanced due diligence memos, OFAC wallet screening, and formatted document output for AI agents, with retained Monte Carlo reporting tools still available.
 
 - enhanced due diligence memos for counterparty and wallet review workflows
 - batch OFAC wallet screening with review signals
 - single-wallet OFAC screening with report output
-- Monte Carlo decision reporting
+- retained Monte Carlo decision reporting
 - PDF, DOCX, and XLSX report generation
 
 This package uses `x402-mcp` for paid MCP tools and exposes a streamable HTTP MCP endpoint with a static server card at `/.well-known/mcp/server-card.json`.

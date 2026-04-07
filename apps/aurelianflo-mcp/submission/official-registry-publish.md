@@ -3,9 +3,11 @@
 ## Published record
 
 - Registry name: `com.aurelianflo/core`
-- Title: `AurelianFlo MCP`
-- Version published: `0.1.0`
-- Published at: `2026-04-06T22:59:27.142221Z`
+- Title: `AurelianFlo`
+- Latest version published: `0.1.1`
+- Latest published at: `2026-04-07T08:46:10.986595Z`
+- Prior version: `0.1.0`
+- Prior published at: `2026-04-06T22:59:27.142221Z`
 - Registry API confirmation:
   `https://registry.modelcontextprotocol.io/v0.1/servers?search=com.aurelianflo/core`
 
@@ -18,7 +20,9 @@
 - Privacy: `https://x402.aurelianflo.com/mcp/privacy`
 - Support: `https://x402.aurelianflo.com/mcp/support`
 - Repository provenance:
-  `https://github.com/kelm2021/x402-data-bazaar`
+  `https://github.com/kelm2021/aurelianflo`
+- Repository subfolder:
+  `apps/aurelianflo-mcp`
 
 ## Auth method used
 
@@ -52,8 +56,8 @@
 2. `mcp-publisher validate` succeeds from `apps/aurelianflo-mcp/submission/`.
 3. `node scripts/mcp_registry_proof.js --key "outputs/mcp-registry/mcp-registry-auth-key.pem"` reproduces the working proof and private seed from the authoritative PEM.
 4. A fresh `mcp-publisher login http --domain aurelianflo.com --private-key ...` succeeds using the seed derived by the helper script.
-5. A subsequent `mcp-publisher publish` attempt returned `invalid version: cannot publish duplicate version`, confirming `0.1.0` was already accepted by the registry before the retry.
-6. The registry API returns the published record and marks it `active`.
+5. A subsequent `0.1.1` metadata update was validated, republished, and accepted by the official registry.
+6. The registry API returns both `0.1.0` and `0.1.1`, with `0.1.1` marked `isLatest: true`.
 7. The saved publisher token decodes to `auth_method=http`, `auth_method_sub=aurelianflo.com`, and `resource=com.aurelianflo/*`.
 
 ## Downstream pickup status
@@ -70,5 +74,11 @@
 
 ## Version policy
 
-- `0.1.0` is now consumed.
-- Any metadata change requires a new version, starting with `0.1.1`.
+- `0.1.0` and `0.1.1` are now consumed.
+- Any further metadata change requires a new version, starting with `0.1.2`.
+
+## Next registry update
+
+- Candidate version: `0.1.2`
+- Trigger:
+  any further human-facing metadata, title, description, icon, or repository changes after the `0.1.1` uniformity release.

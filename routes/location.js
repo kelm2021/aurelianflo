@@ -24,9 +24,9 @@ function normalizeZipCode(value) {
 function getNominatimUserAgent() {
   const contact = String(process.env.UPSTREAM_CONTACT_EMAIL || "").trim();
   if (contact) {
-    return `x402-data-bazaar/1.0 (${contact})`;
+    return `aurelianflo/1.0 (${contact})`;
   }
-  return "x402-data-bazaar/1.0";
+  return "aurelianflo/1.0";
 }
 
 function normalizeNominatimResult(entry) {

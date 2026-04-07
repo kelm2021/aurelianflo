@@ -193,7 +193,7 @@ export const MCP_TOOL_DEFINITIONS = [
     name: "ofac_wallet_screen",
     description:
       "Screen a wallet address against OFAC SDN digital currency address designations, returning exact hits, sanctioned entity metadata, asset coverage, and a manual-review signal.",
-    price: 0.005,
+    price: 0.01,
     route: {
       method: "GET",
       pathTemplate: "/api/ofac-wallet-screen/{address}",
@@ -240,7 +240,7 @@ export const MCP_TOOL_DEFINITIONS = [
     name: "batch_wallet_screen",
     description:
       "Screen a batch of wallet addresses against OFAC SDN digital currency address designations, returning per-wallet results plus a batch-level proceed-or-pause decision and structured output.",
-    price: 0.025,
+    price: 0.1,
     route: {
       method: "POST",
       pathTemplate: "/api/workflows/compliance/batch-wallet-screen",
@@ -301,7 +301,7 @@ export const MCP_TOOL_DEFINITIONS = [
     name: "edd_report",
     description:
       "Generate an enhanced due diligence memo for a wallet set using exact-match OFAC screening, evidence summary, required follow-up, and JSON, PDF, or DOCX output.",
-    price: 0.09,
+    price: 0.25,
     route: {
       method: "POST",
       pathTemplate: "/api/workflows/compliance/edd-report",
@@ -582,7 +582,7 @@ export const MCP_TOOL_DEFINITIONS = [
     name: "report_pdf_generate",
     description:
       "Generate a PDF artifact from structured report tables, metrics, and summary content.",
-    price: 0.2,
+    price: 0.05,
     route: {
       method: "POST",
       pathTemplate: "/api/tools/report/pdf/generate",
@@ -612,7 +612,7 @@ export const MCP_TOOL_DEFINITIONS = [
     name: "report_docx_generate",
     description:
       "Generate a DOCX artifact from structured report tables, metrics, and summary content.",
-    price: 0.16,
+    price: 0.06,
     route: {
       method: "POST",
       pathTemplate: "/api/tools/report/docx/generate",

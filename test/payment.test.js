@@ -133,14 +133,14 @@ test("health root serves title/description metadata when HTML is requested", asy
     assert.equal(response.status, 200);
     assert.match(String(response.headers.get("content-type") || ""), /text\/html/i);
     assert.match(body, /<title>AurelianFlo<\/title>/i);
-    assert.match(body, /<meta name="description" content="AurelianFlo is a pay-per-call API for OFAC screening/i);
-    assert.match(body, /finance scenario workflows/i);
-    assert.match(body, /formatted document output/i);
-    assert.doesNotMatch(body, /workflow-safe|one paid call|premium PDF artifact|workbook-ready/i);
+    assert.match(body, /<meta name="description" content="AurelianFlo is a pay-per-call API for enhanced due diligence memos/i);
+    assert.match(body, /OFAC wallet screening/i);
+    assert.match(body, /audit-ready document output \(PDF, DOCX, XLSX\)/i);
+    assert.doesNotMatch(body, /finance scenario workflows|vendor due diligence|Monte Carlo/i);
   });
 });
 
-test("api discovery endpoint lists concrete endpoint metadata without payment", async () => {
+test("api discovery endpoint lists the compliance-first public surface without payment", async () => {
   const app = createApp({ enableDebugRoutes: false });
 
   await withServer(app, async (baseUrl) => {
@@ -148,22 +148,31 @@ test("api discovery endpoint lists concrete endpoint metadata without payment", 
       headers: { Accept: "application/json" },
     });
     const body = await response.json();
-    const vendorRiskEntry = body.catalog.find((entry) => entry.routeKey === "POST /api/workflows/vendor/risk-assessment");
+    const routeKeys = new Set(body.catalog.map((entry) => entry.routeKey));
+    const eddEntry = body.catalog.find((entry) => entry.routeKey === "POST /api/workflows/compliance/edd-report");
+    const reportPdfEntry = body.catalog.find((entry) => entry.routeKey === "POST /api/tools/report/pdf/generate");
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("payment-required"), null);
     assert.equal(body.name, "AurelianFlo");
     assert.equal(body.payment.protocol, "x402");
     assert.ok(Array.isArray(body.catalog));
-    assert.ok(body.catalog.length > 0);
-    assert.ok(vendorRiskEntry);
-    assert.equal(vendorRiskEntry.category, "workflows/vendor");
-    assert.equal(vendorRiskEntry.priceUsd, 0.18);
+    assert.equal(body.catalog.length, 8);
+    assert.ok(eddEntry);
+    assert.equal(eddEntry.category, "workflows/compliance");
+    assert.equal(eddEntry.priceUsd, 0.25);
     assert.equal(
-      vendorRiskEntry.exampleUrl,
-      "https://x402.aurelianflo.com/api/workflows/vendor/risk-assessment",
+      eddEntry.exampleUrl,
+      "https://x402.aurelianflo.com/api/workflows/compliance/edd-report",
     );
-    assert.equal(vendorRiskEntry.payment.network, X402_NETWORK);
+    assert.ok(reportPdfEntry);
+    assert.equal(reportPdfEntry.category, "generated/document");
+    assert.ok(routeKeys.has("GET /api/ofac-wallet-screen/:address"));
+    assert.ok(routeKeys.has("POST /api/workflows/compliance/batch-wallet-screen"));
+    assert.ok(!routeKeys.has("POST /api/workflows/vendor/risk-assessment"));
+    assert.ok(!routeKeys.has("POST /api/workflows/finance/cash-runway-forecast"));
+    assert.ok(!routeKeys.has("POST /api/sim/report"));
+    assert.equal(eddEntry.payment.network, X402_NETWORK);
   });
 });
 
@@ -183,14 +192,17 @@ test("openapi document is publicly reachable with title and icon metadata", asyn
     assert.equal(body.info.version, "1.0.0");
     assert.equal(body.info["x-logo"].url, "https://x402.aurelianflo.com/favicon.ico");
     assert.equal(body.servers[0].url, "https://x402.aurelianflo.com");
-    assert.match(body.info.description, /OFAC screening/i);
-    assert.match(body.info.description, /vendor diligence/i);
-    assert.match(body.info.description, /finance scenario workflows/i);
-    assert.match(body.info.description, /PDF, DOCX, XLSX/i);
-    assert.ok(body.paths["/api/workflows/vendor/risk-assessment"]?.post);
+    assert.match(body.info.description, /enhanced due diligence memos/i);
+    assert.match(body.info.description, /OFAC wallet screening/i);
+    assert.match(body.info.description, /audit-ready document output \(PDF, DOCX, XLSX\)/i);
+    assert.ok(body.paths["/api/workflows/compliance/edd-report"]?.post);
+    assert.ok(body.paths["/api/tools/report/pdf/generate"]?.post);
     assert.ok(!body.paths["/api/stocks/search"]?.get);
+    assert.ok(!body.paths["/api/workflows/vendor/risk-assessment"]?.post);
+    assert.ok(!body.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
+    assert.ok(!body.paths["/api/sim/report"]?.post);
     assert.equal(fullResponse.status, 200);
-    assert.ok(fullBody.paths["/api/stocks/search"]?.get);
+    assert.ok(!fullBody.paths["/api/stocks/search"]?.get);
   });
 });
 
@@ -255,47 +267,24 @@ test("well-known x402 manifest is publicly reachable", async () => {
     assert.equal(standardPathResponse.status, 200);
     assert.equal(standardPathBody.version, 1);
     assert.ok(Array.isArray(standardPathBody.resources));
-    assert.deepEqual(
-      standardPathBody.resources,
-      [
-        "https://x402.aurelianflo.com/api/workflows/compliance/edd-report",
-        "https://x402.aurelianflo.com/api/workflows/compliance/batch-wallet-screen",
-        "https://x402.aurelianflo.com/api/ofac-wallet-screen/0x098B716B8Aaf21512996dC57EB0615e2383E2f96?asset=ETH",
-        "https://x402.aurelianflo.com/api/sim/report",
-        "https://x402.aurelianflo.com/api/tools/report/pdf/generate",
-        "https://x402.aurelianflo.com/api/tools/report/docx/generate",
-      ],
-    );
+    assert.deepEqual(standardPathBody.resources, [
+      "https://x402.aurelianflo.com/api/workflows/compliance/edd-report",
+      "https://x402.aurelianflo.com/api/workflows/compliance/batch-wallet-screen",
+      "https://x402.aurelianflo.com/api/ofac-wallet-screen/0x098B716B8Aaf21512996dC57EB0615e2383E2f96?asset=ETH",
+      "https://x402.aurelianflo.com/api/tools/report/pdf/generate",
+      "https://x402.aurelianflo.com/api/tools/report/docx/generate",
+      "https://x402.aurelianflo.com/api/tools/report/xlsx/generate",
+    ]);
     assert.equal(standardPathBody.endpointCount, 6);
     assert.equal(dotWellKnownResponse.status, 200);
     assert.equal(dotWellKnownBody.name, "AurelianFlo");
     assert.equal(dotWellKnownBody.website, "https://x402.aurelianflo.com");
     assert.ok(Array.isArray(dotWellKnownBody.resources));
-    assert.ok(dotWellKnownBody.resources.length >= 20);
-    assert.match(String(dotWellKnownBody.instructions || ""), /## Composable Simulations/);
+    assert.ok(dotWellKnownBody.resources.length <= 8);
+    assert.match(String(dotWellKnownBody.instructions || ""), /## Primary Surface/);
+    assert.doesNotMatch(String(dotWellKnownBody.instructions || ""), /vendor due diligence|Monte Carlo|finance scenario/i);
     assert.ok(Array.isArray(dotWellKnownBody.endpoints));
-
-    const simulationEndpoints = dotWellKnownBody.endpoints.filter(
-      (endpoint) =>
-        endpoint.method === "POST" && String(endpoint.path || "").startsWith("/api/sim/"),
-    );
-    assert.equal(simulationEndpoints.length, 8);
-    assert.ok(simulationEndpoints.some((endpoint) => endpoint.path === "/api/sim/batch-probability"));
-    assert.ok(simulationEndpoints.some((endpoint) => endpoint.path === "/api/sim/report"));
-
-    const probabilityEndpoint = simulationEndpoints.find((endpoint) => endpoint.path === "/api/sim/probability");
-    const reportEndpoint = simulationEndpoints.find((endpoint) => endpoint.path === "/api/sim/report");
-
-    assert.equal(probabilityEndpoint?.composability?.pattern, "data-to-simulation");
-    assert.equal(reportEndpoint?.composability?.pattern, "simulation-to-report");
-    for (const endpoint of simulationEndpoints) {
-      assert.ok(typeof endpoint.composability?.description === "string", endpoint.path);
-    }
-
-    for (const resourceUrl of genericSimulatorResources) {
-      assert.ok(dotWellKnownBody.resources.includes(resourceUrl), resourceUrl);
-    }
-
+    assert.ok(dotWellKnownBody.endpoints.every((endpoint) => String(endpoint.path || "").startsWith("/api/workflows/compliance/") || String(endpoint.path || "").startsWith("/api/tools/report/") || String(endpoint.path || "") === "/api/ofac-wallet-screen/:address"));
     assert.ok(!dotWellKnownBody.resources.includes(`${genericSimulatorBaseUrl}/methodology`));
     assert.ok(!dotWellKnownBody.resources.includes(`${genericSimulatorBaseUrl}/integrations/payments-mcp`));
   });
@@ -337,12 +326,11 @@ test("402index verification file is publicly reachable", async () => {
   });
 });
 
-test("main app bucket includes bundled seller routes including generic-parameter-simulator", async () => {
+test("main app bucket exposes only the compliance-first public surface", async () => {
   const app = createApp({
     enableDebugRoutes: false,
     facilitatorLoader: async () => createStubFacilitator(),
   });
-  const genericSimulatorRoutes = getSellerRoutes(genericSimulatorSellerConfig);
 
   await withServer(app, async (baseUrl) => {
     const discoveryResponse = await fetch(`${baseUrl}/api?format=json`, {
@@ -353,22 +341,17 @@ test("main app bucket includes bundled seller routes including generic-parameter
 
     assert.equal(discoveryResponse.status, 200);
     assert.ok(routeKeys.has("GET /api/ofac-wallet-screen/:address"));
-    assert.ok(routeKeys.has("GET /api/vendor-entity-brief"));
-
-    for (const route of genericSimulatorRoutes) {
-      assert.ok(routeKeys.has(route.key), route.key);
-    }
+    assert.ok(routeKeys.has("POST /api/workflows/compliance/edd-report"));
+    assert.ok(routeKeys.has("POST /api/tools/report/pdf/generate"));
+    assert.ok(!routeKeys.has("GET /api/vendor-entity-brief"));
+    assert.ok(!routeKeys.has("POST /api/sim/report"));
+    assert.ok(!routeKeys.has("POST /api/workflows/finance/cash-runway-forecast"));
 
     const cases = [
       {
         path: "/api/ofac-wallet-screen/0x098B716B8Aaf21512996dC57EB0615e2383E2f96?asset=ETH",
-        expectedAmount: "5000",
+        expectedAmount: "10000",
         expectedCategory: "compliance",
-      },
-      {
-        path: "/api/vendor-entity-brief?name=SBERBANK&country=CZ&minScore=90&limit=3",
-        expectedAmount: "250000",
-        expectedCategory: "identity",
       },
     ];
 
@@ -399,9 +382,8 @@ test("full discovery keeps only the curated AurelianFlo route inventory", async 
 
     assert.equal(response.status, 200);
     assert.ok(routeKeys.has("POST /api/workflows/compliance/edd-report"));
-    assert.ok(routeKeys.has("POST /api/workflows/vendor/risk-forecast"));
-    assert.ok(routeKeys.has("POST /api/workflows/finance/pricing-scenario-forecast"));
-    assert.ok(routeKeys.has("POST /api/tools/xlsx/render-template"));
+    assert.ok(routeKeys.has("POST /api/tools/report/xlsx/generate"));
+    assert.ok(routeKeys.has("POST /api/tools/report/generate"));
     assert.ok(!routeKeys.has("GET /api/stocks/quote/*"));
     assert.ok(!routeKeys.has("GET /api/treasury-rates"));
     assert.ok(!routeKeys.has("GET /api/weather/historical"));
@@ -410,6 +392,10 @@ test("full discovery keeps only the curated AurelianFlo route inventory", async 
     assert.ok(!routeKeys.has("GET /api/courts/opinions"));
     assert.ok(!routeKeys.has("POST /api/tools/contract/generate"));
     assert.ok(!routeKeys.has("POST /api/tools/password/generate"));
+    assert.ok(!routeKeys.has("GET /api/vendor-entity-brief"));
+    assert.ok(!routeKeys.has("POST /api/sim/report"));
+    assert.ok(!routeKeys.has("POST /api/workflows/finance/pricing-scenario-forecast"));
+    assert.ok(!routeKeys.has("POST /api/workflows/vendor/risk-forecast"));
   });
 });
 

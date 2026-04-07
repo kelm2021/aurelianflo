@@ -8,7 +8,7 @@ const DEFAULT_MIN_SCORE = 90;
 const DEFAULT_LIMIT = 3;
 const MAX_LIMIT = 5;
 const USER_AGENT =
-  "vendor-entity-brief/1.0 (+https://vendor-entity-brief.vercel.app)";
+  "aurelianflo-vendor/1.0 (+https://x402.aurelianflo.com)";
 const FRESHNESS_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 const freshnessCache = {

@@ -6,7 +6,7 @@ This support page applies to the AurelianFlo remote MCP server and its published
 
 - Support email: `support@aurelianflo.com`
 - Documentation landing page: `https://x402.aurelianflo.com/mcp/docs`
-- Issue tracking: `https://github.com/kelm2021/x402-data-bazaar/issues`
+- Issue tracking: `https://github.com/kelm2021/aurelianflo/issues`
 
 ## Support Scope
 

@@ -1,9 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const zlib = require("node:zlib");
 const ExcelJS = require("exceljs");
 const JSZip = require("jszip");
 
 const { buildDocumentArtifact, isDocumentArtifactPath } = require("../routes/auto-local/doc-artifacts");
+const { htmlToMarkdownLike } = require("../routes/auto-local/pdf-generators");
 const {
   buildStructuredReport,
   createAssumptionsTable,
@@ -15,6 +17,53 @@ function decodeArtifactBuffer(payload) {
   assert.equal(payload.success, true);
   assert.equal(typeof payload.data?.artifact?.contentBase64, "string");
   return Buffer.from(payload.data.artifact.contentBase64, "base64");
+}
+
+function extractPdfText(buffer) {
+  const source = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || "");
+  const matches = [];
+  const text = source.toString("latin1");
+  const streamPattern = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+  let match;
+  while ((match = streamPattern.exec(text)) !== null) {
+    const chunk = Buffer.from(match[1], "latin1");
+    try {
+      matches.push(zlib.inflateSync(chunk).toString("latin1"));
+      continue;
+    } catch {}
+    matches.push(chunk.toString("latin1"));
+  }
+  matches.push(text);
+  const combined = matches.join("\n");
+  return combined
+    .replace(/\[([\s\S]*?)\]\s*TJ/g, (_match, content) => {
+      const parts = [];
+      content.replace(/<([0-9A-Fa-f]+)>|\(((?:\\.|[^\\)])*)\)/g, (_token, hex, literal) => {
+        if (hex) {
+          parts.push(Buffer.from(hex, "hex").toString("latin1"));
+        } else if (literal) {
+          parts.push(literal.replace(/\\([\\()])/g, "$1"));
+        }
+        return "";
+      });
+      return parts.join("");
+    })
+    .replace(/\(((?:\\.|[^\\)])*)\)\s*Tj/g, (_match, literal) => literal.replace(/\\([\\()])/g, "$1"))
+    .replace(/<([0-9A-Fa-f]+)>/g, (_match, hex) => {
+      try {
+        return Buffer.from(hex, "hex").toString("latin1");
+      } catch {
+        return "";
+      }
+    })
+    .replace(/\\([\\()])/g, "$1");
+}
+
+function normalizePdfSearchText(value) {
+  return String(value || "")
+    .replace(/\b-?\d+(?:\.\d+)?\b/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "")
+    .toLowerCase();
 }
 
 async function readZipEntryText(payload, entryName) {
@@ -264,6 +313,64 @@ test("buildDocumentArtifact returns real binary PDF for /pdf/ paths", async () =
   const bytes = decodeArtifactBuffer(payload);
   assert.ok(bytes.length > 0);
   assert.equal(bytes.subarray(0, 4).toString("ascii"), "%PDF");
+});
+
+test("buildDocumentArtifact rejects empty generic PDF payloads instead of minting stub PDFs", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/generate",
+    endpoint: "POST /api/tools/pdf/generate",
+    body: {},
+  });
+
+  assert.equal(payload.success, false);
+  assert.equal(payload.error, "invalid_input");
+  assert.match(String(payload.message || ""), /pdf/i);
+});
+
+test("buildDocumentArtifact renders markdown payloads on generic pdf route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/generate",
+    endpoint: "POST /api/tools/pdf/generate",
+    body: {
+      title: "Meridian x402 Marketplace",
+      format: "markdown",
+      content: "# Meridian x402 Marketplace\n\n- Paid APIs\n- Structured reports\n",
+    },
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "pdf");
+
+  const bytes = decodeArtifactBuffer(payload);
+  const asText = extractPdfText(bytes);
+  assert.ok(bytes.toString("latin1").startsWith("%PDF"));
+  const normalized = normalizePdfSearchText(asText);
+  assert.match(normalized, /meridianx402marketplace/);
+  assert.match(normalized, /paidapis/);
+  assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/pdf\/generate/);
+});
+
+test("buildDocumentArtifact renders html payloads on generic pdf route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/generate",
+    endpoint: "POST /api/tools/pdf/generate",
+    body: {
+      title: "Rendered HTML",
+      html: "<!DOCTYPE html><html><body><h1>Rendered HTML</h1><p>Paragraph body.</p><ul><li>One</li><li>Two</li></ul></body></html>",
+    },
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "pdf");
+
+  const bytes = decodeArtifactBuffer(payload);
+  const asText = extractPdfText(bytes);
+  assert.ok(bytes.toString("latin1").startsWith("%PDF"));
+  const normalized = normalizePdfSearchText(asText);
+  assert.match(normalized, /renderedhtml/);
+  assert.match(normalized, /paragraphbody/);
+  assert.match(normalized, /one/);
+  assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/pdf\/generate/);
 });
 
 test("buildDocumentArtifact returns real binary PDF for invoice/receipt-like paths", async () => {
@@ -584,6 +691,103 @@ test("buildDocumentArtifact renders markdown PDFs with dedicated filename and ri
   assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/markdown-to-pdf/);
 });
 
+test("buildDocumentArtifact renders premium markdown tables and inline formatting on pdf/generate", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/generate",
+    endpoint: "POST /api/tools/pdf/generate",
+    body: {
+      title: "Premium Markdown",
+      format: "markdown",
+      content: [
+        "# Premium Markdown",
+        "",
+        "Use **premium** formatting with `inline_code` and a proper table:",
+        "",
+        "| Route | Status |",
+        "| --- | --- |",
+        "| report/generate | healthy |",
+        "| pdf/generate | upgraded |",
+      ].join("\n"),
+    },
+  });
+
+  assert.equal(payload.success, true);
+  const bytes = decodeArtifactBuffer(payload);
+  const normalized = normalizePdfSearchText(extractPdfText(bytes));
+  assert.match(normalized, /premiummarkdown/);
+  assert.match(normalized, /premium/);
+  assert.match(normalized, /inlinecode/);
+  assert.match(normalized, /route/);
+  assert.match(normalized, /status/);
+  assert.match(normalized, /reportgenerate/);
+  assert.match(normalized, /healthy/);
+  assert.match(normalized, /pdfgenerate/);
+  assert.match(normalized, /upgraded/);
+  assert.doesNotMatch(extractPdfText(bytes), /\*\*premium\*\*/);
+  assert.doesNotMatch(extractPdfText(bytes), /\|\s*Route\s*\|/);
+});
+
+test("htmlToMarkdownLike preserves emphasis, lists, and table rows for premium html rendering", () => {
+  assert.equal(typeof htmlToMarkdownLike, "function");
+
+  const markdown = htmlToMarkdownLike(`
+    <!doctype html>
+    <html>
+      <body>
+        <h1>Revenue Overview</h1>
+        <p><strong>Premium</strong> plan with <em>faster</em> reporting.</p>
+        <ul><li>Launch</li><li>Verify</li></ul>
+        <table>
+          <thead><tr><th>Quarter</th><th>Revenue</th></tr></thead>
+          <tbody>
+            <tr><td>Q1</td><td>$10</td></tr>
+            <tr><td>Q2</td><td>$12</td></tr>
+          </tbody>
+        </table>
+      </body>
+    </html>
+  `);
+
+  assert.match(markdown, /^# Revenue Overview/m);
+  assert.match(markdown, /\*\*Premium\*\* plan with \*faster\* reporting\./);
+  assert.match(markdown, /- Launch/);
+  assert.match(markdown, /\| Quarter \| Revenue \|/);
+  assert.match(markdown, /\| Q1 \| \$10 \|/);
+  assert.match(markdown, /\| Q2 \| \$12 \|/);
+});
+
+test("buildDocumentArtifact renders direct HTML ordered lists and code blocks without flattening them into bullets", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/generate",
+    endpoint: "POST /api/tools/pdf/generate",
+    body: {
+      title: "Premium HTML",
+      format: "html",
+      content: `
+        <html>
+          <body>
+            <h1>Launch Checklist</h1>
+            <ol>
+              <li>Plan rollout</li>
+              <li>Verify payments</li>
+            </ol>
+            <pre><code>npm run build
+npm run deploy</code></pre>
+          </body>
+        </html>
+      `,
+    },
+  });
+
+  assert.equal(payload.success, true);
+  const extracted = extractPdfText(decodeArtifactBuffer(payload));
+  assert.match(extracted, /1\./);
+  assert.match(extracted, /2\./);
+  assert.match(extracted, /npm run build/);
+  assert.match(extracted, /npm run deploy/);
+  assert.doesNotMatch(extracted, /<ol>|<pre>|<code>/);
+});
+
 test("buildDocumentArtifact ingests shared report model directly into report PDF output", async () => {
   const payload = await buildDocumentArtifact({
     path: "/api/tools/report/generate",
@@ -598,6 +802,83 @@ test("buildDocumentArtifact ingests shared report model directly into report PDF
   const asText = bytes.toString("latin1");
   assert.ok(asText.startsWith("%PDF"));
   assert.ok(bytes.length > 1800);
+  assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/report\/generate/);
+});
+
+test("buildDocumentArtifact renders premium report metadata and metrics from the shared report model", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/report/generate",
+    endpoint: "POST /api/tools/report/generate",
+    body: buildStructuredReport({
+      reportMeta: {
+        report_type: "ops-brief",
+        title: "Weekly Ops Brief",
+        author: "AurelianFlo",
+        date: "2026-04-05",
+        version: "v2.0",
+      },
+      executiveSummary: [
+        "Core routes stayed available through the reporting window.",
+      ],
+      headlineMetrics: [
+        createHeadlineMetric("Uptime", "99.9%", "percent"),
+        createHeadlineMetric("Incidents", 1, "count"),
+      ],
+      tables: {
+        route_health: createTable(
+          ["route", "status"],
+          [{ route: "/api/tools/report/generate", status: "healthy" }],
+        ),
+      },
+    }),
+  });
+
+  assert.equal(payload.success, true);
+  const extracted = extractPdfText(decodeArtifactBuffer(payload));
+  const normalized = normalizePdfSearchText(extracted);
+  assert.match(normalized, /weeklyopsbrief/);
+  assert.match(normalized, /opsbrief/);
+  assert.match(normalized, /aurelianflo/);
+  assert.match(extracted, /2026-04-05/);
+  assert.match(extracted, /v2\.0/);
+  assert.match(normalized, /uptime/);
+  assert.match(normalized, /percent/);
+  assert.match(normalized, /incidents/);
+  assert.match(normalized, /count/);
+});
+
+test("buildDocumentArtifact renders legacy report payloads into styled report PDFs", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/report/generate",
+    endpoint: "POST /api/tools/report/generate",
+    body: {
+      title: "Meridian x402 Marketplace",
+      subtitle: "Positioning brief",
+      summary: "Decision workflows for agents.",
+      sections: [
+        {
+          heading: "Core Offering",
+          body: "Simulation, due diligence, and report generation.",
+        },
+        {
+          heading: "Why It Matters",
+          bullets: ["Pay per call", "Report-ready output"],
+        },
+      ],
+    },
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "pdf");
+
+  const bytes = decodeArtifactBuffer(payload);
+  const asText = extractPdfText(bytes);
+  assert.ok(bytes.toString("latin1").startsWith("%PDF"));
+  const normalized = normalizePdfSearchText(asText);
+  assert.match(normalized, /meridianx402marketplace/);
+  assert.match(normalized, /decisionworkflowsforagents/);
+  assert.match(normalized, /coreoffering/);
+  assert.match(normalized, /paypercall/);
   assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/report\/generate/);
 });
 
@@ -633,4 +914,88 @@ test("buildDocumentArtifact derives document-specific recommended path for vendo
   const asText = bytes.toString("latin1");
   assert.ok(asText.startsWith("%PDF"));
   assert.doesNotMatch(asText, /Generated from POST \/api\/tools\/report\/generate/);
+});
+
+test("buildDocumentArtifact supports explicit premium report DOCX route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/report/docx/generate",
+    endpoint: "POST /api/tools/report/docx/generate",
+    body: buildSharedReportFixture(),
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "docx");
+  assert.equal(payload.data.capabilities.selected.lane, "premium-report");
+  assert.match(String(payload.data.capabilities.selected.engine || ""), /report-docx|docx/);
+
+  const documentXml = await readZipEntryText(payload, "word/document.xml");
+  assert.match(documentXml, /Vendor onboarding brief/);
+  assert.match(documentXml, /Counterparty passed data-quality checks/);
+});
+
+test("buildDocumentArtifact supports explicit premium report XLSX route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/report/xlsx/generate",
+    endpoint: "POST /api/tools/report/xlsx/generate",
+    body: buildSharedReportFixture(),
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "xlsx");
+  assert.equal(payload.data.capabilities.selected.lane, "premium-report");
+  assert.match(String(payload.data.capabilities.selected.engine || ""), /report-xlsx|xlsx/);
+
+  const workbook = await readWorkbook(payload);
+  assert.ok(workbook.worksheets.length >= 1);
+  assert.ok(workbook.worksheets.some((worksheet) => worksheetContains(worksheet, "Counterparty passed data-quality checks.")));
+  assert.ok(workbook.worksheets.some((worksheet) => worksheetContains(worksheet, "Risk tier")));
+});
+
+test("buildDocumentArtifact supports explicit max-fidelity PDF render-html route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/pdf/render-html",
+    endpoint: "POST /api/tools/pdf/render-html",
+    body: {
+      title: "Styled HTML Brief",
+      html: "<html><body><h1>Styled HTML Brief</h1><ol><li>First</li><li>Second</li></ol><table><tr><th>Metric</th><th>Value</th></tr><tr><td>ARR</td><td>$42k</td></tr></table></body></html>",
+      css: "table{border-collapse:collapse}th,td{border:1px solid #000;padding:4px}",
+    },
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "pdf");
+  assert.equal(payload.data.capabilities.selected.lane, "max-fidelity");
+  assert.equal(payload.data.capabilities.selected.requestedEngine, "chromium");
+  assert.equal(typeof payload.data.capabilities.selected.degraded, "boolean");
+  if (payload.data.capabilities.selected.degraded) {
+    assert.equal(typeof payload.data.capabilities.selected.degradationReason, "string");
+  }
+  assert.match(String(payload.data.capabilities.selected.engine || ""), /chromium|semantic/);
+
+  const extracted = extractPdfText(decodeArtifactBuffer(payload));
+  assert.match(extracted, /Styled HTML Brief/);
+  assert.match(extracted, /First/);
+  assert.match(extracted, /Metric/);
+});
+
+test("buildDocumentArtifact supports explicit template XLSX route", async () => {
+  const payload = await buildDocumentArtifact({
+    path: "/api/tools/xlsx/render-template",
+    endpoint: "POST /api/tools/xlsx/render-template",
+    body: {
+      title: "Revenue Tracker",
+      template: "tracker",
+      items: [
+        { name: "Launch docs", owner: "Ops", due_date: "2026-04-10", status: "In Progress" },
+      ],
+    },
+  });
+
+  assert.equal(payload.success, true);
+  assert.equal(payload.data.documentType, "xlsx");
+  assert.equal(payload.data.capabilities.selected.lane, "max-fidelity");
+  assert.match(String(payload.data.capabilities.selected.engine || ""), /template-xlsx|xlsx/);
+
+  const workbook = await readWorkbook(payload);
+  assert.ok(workbook.getWorksheet("Revenue Tracker"));
 });

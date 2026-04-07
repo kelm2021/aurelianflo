@@ -64,5 +64,5 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, "0.0.0.0", () => {
-  console.log(`AurelianFlo MCP server listening on http://0.0.0.0:${port}`);
+  console.log(`AurelianFlo server listening on http://0.0.0.0:${port}`);
 });

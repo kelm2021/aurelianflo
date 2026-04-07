@@ -189,7 +189,7 @@ test("protected route returns payment requirements without a payment header", as
     assert.equal(body.accepts[0].amount, expectedAmount);
     assert.equal(
       body.accepts[0].resource,
-      "https://vendor-entity-brief.vercel.app/api/vendor-entity-brief",
+      "https://x402.aurelianflo.com/api/vendor-entity-brief",
     );
   });
 });

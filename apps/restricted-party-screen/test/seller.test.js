@@ -14,11 +14,10 @@ const {
   sellerConfig,
 } = require("../app");
 const {
-  OFAC_CONSOLIDATED_LIST_URL,
-  OFAC_SDN_LIST_URL,
-  OFAC_SEARCH_URL,
-  resetFreshnessCache,
+  OFAC_SDN_ADVANCED_XML_URL,
+  resetDatasetCache,
 } = require("../lib/ofac");
+const { OFAC_WALLET_XML } = require("./fixtures/ofac-wallet-xml");
 
 function getSellerRoutes() {
   if (Array.isArray(sellerConfig.routes) && sellerConfig.routes.length) {
@@ -30,12 +29,6 @@ function getSellerRoutes() {
 
 function getPrimaryRoute() {
   return getSellerRoutes()[0];
-}
-
-function getVendorBatchRoute() {
-  return getSellerRoutes().find(
-    (route) => route.routePath === "/api/vendor-onboarding/restricted-party-batch",
-  );
 }
 
 function buildRouteRequestPath(route, options = {}) {
@@ -93,26 +86,31 @@ function withServer(app, run) {
   });
 }
 
-function createJsonFetchResponse(status, body) {
+function createTextFetchResponse(status, body, headers = {}) {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get(name) {
+        return headers[String(name).toLowerCase()] ?? null;
+      },
+    },
     async text() {
-      return JSON.stringify(body);
+      return body;
     },
   };
 }
 
 function withPatchedGlobalFetch(run, responder) {
   const originalFetch = global.fetch;
-  resetFreshnessCache();
+  resetDatasetCache();
   global.fetch = responder;
 
   return Promise.resolve()
     .then(run)
     .finally(() => {
       global.fetch = originalFetch;
-      resetFreshnessCache();
+      resetDatasetCache();
     });
 }
 
@@ -132,7 +130,7 @@ test("requiring index.js does not start the server", () => {
   assert.doesNotMatch(result.stdout, /running on port/i);
 });
 
-test("health check stays free", async () => {
+test("health check stays free and advertises the wallet screen", async () => {
   const app = createApp();
 
   await withServer(app, async (baseUrl) => {
@@ -142,10 +140,11 @@ test("health check stays free", async () => {
     assert.equal(response.status, 200);
     assert.equal(body.name, sellerConfig.serviceName);
     assert.equal(body.payment.protocol, "x402");
-    assert.equal(body.payment.pricingDenomination, "USDC");
-    assert.equal(body.catalog.length, getSellerRoutes().length);
-    assert.match(body.catalog[0].path, /ofac-sanctions-screening/);
-    assert.match(body.catalog[0].canonicalUrl, /ofac-sanctions-screening/);
+    assert.equal(body.catalog.length, 4);
+    assert.ok(body.catalog.some((entry) => /ofac-wallet-screen/.test(String(entry.path || ""))));
+    assert.ok(body.catalog.some((entry) => /wallet-sanctions-report/.test(String(entry.path || ""))));
+    assert.ok(body.catalog.some((entry) => /batch-wallet-screen/.test(String(entry.path || ""))));
+    assert.ok(body.catalog.some((entry) => /edd-report/.test(String(entry.path || ""))));
     assert.equal(body.extensions.signInWithX.enabled, true);
     assert.equal(body.integrations.paymentsMcp.installerPackage, "@coinbase/payments-mcp");
     assert.ok(body.integrations.paymentsMcp.scenarioPrompts.length >= 3);
@@ -163,11 +162,9 @@ test("payments MCP integration endpoint stays free", async () => {
     assert.equal(body.service, sellerConfig.serviceName);
     assert.equal(body.paymentsMcp.installerPackage, "@coinbase/payments-mcp");
     assert.match(body.paymentsMcp.installCommands.codex, /payments-mcp/);
-    assert.match(body.paymentsMcp.primaryPrompt, /ofac-sanctions-screening/);
-    assert.ok(
-      body.paymentsMcp.scenarioPrompts.some((entry) => entry.id === "vendor-batch-screening"),
-    );
-    assert.ok(body.paymentsMcp.shareCopy.shortPost.includes("restricted-party-screen"));
+    assert.match(body.paymentsMcp.primaryPrompt, /edd-report/);
+    assert.doesNotMatch(body.paymentsMcp.primaryPrompt, /\r|\n/);
+    assert.ok(body.paymentsMcp.shareCopy.shortPost.includes("wallet"));
     assert.equal(body.signInWithX.enabled, true);
   });
 });
@@ -193,117 +190,11 @@ test("protected route returns payment requirements without a payment header", as
     assert.equal(body.accepts[0].payTo, PAY_TO);
     assert.equal(body.accepts[0].network, X402_NETWORK);
     assert.equal(body.accepts[0].amount, expectedAmount);
+    assert.equal(
+      body.accepts[0].resource,
+      "https://x402.aurelianflo.com/api/ofac-wallet-screen/0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+    );
     assert.ok(body.extensions["sign-in-with-x"]);
-  });
-});
-
-test("batch vendor route returns payment requirements without a payment header", async () => {
-  const app = createApp({
-    env: {},
-    facilitatorLoader: async () => createStubFacilitator(),
-  });
-  const vendorBatchRoute = getVendorBatchRoute();
-  const canonicalPath = buildRouteRequestPath(vendorBatchRoute);
-
-  await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}${canonicalPath}`);
-    const body = await response.json();
-    const expectedAmount = String(Math.round(Number(vendorBatchRoute.price) * 1000000));
-
-    assert.equal(response.status, 402);
-    assert.equal(body.accepts[0].amount, expectedAmount);
-    assert.equal(body.x402Version, 2);
-    assert.equal(body.error, "Payment required");
-  });
-});
-
-test("facilitator init failures retry within the same unpaid request", async () => {
-  let middlewareFactoryCalls = 0;
-  const primaryRoute = getPrimaryRoute();
-  const canonicalPath = buildRouteRequestPath(primaryRoute);
-  const app = createApp({
-    env: {},
-    facilitatorLoader: async () => createStubFacilitator(),
-    paymentMiddlewareFactory: () => {
-      middlewareFactoryCalls += 1;
-      if (middlewareFactoryCalls === 1) {
-        throw new Error(
-          "Failed to initialize: no supported payment kinds loaded from any facilitator.",
-        );
-      }
-
-      return async (_req, res) => {
-        res.status(418).json({ ok: true });
-      };
-    },
-  });
-
-  await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}${canonicalPath}`);
-    const body = await response.json();
-
-    assert.equal(response.status, 418);
-    assert.deepEqual(body, { ok: true });
-    assert.equal(middlewareFactoryCalls, 2);
-  });
-});
-
-test("facilitator init failures retry within the same paid request", async () => {
-  let middlewareFactoryCalls = 0;
-  const primaryRoute = getPrimaryRoute();
-  const canonicalPath = buildRouteRequestPath(primaryRoute);
-  const app = createApp({
-    env: {},
-    facilitatorLoader: async () => createStubFacilitator(),
-    paymentMiddlewareFactory: () => {
-      middlewareFactoryCalls += 1;
-      if (middlewareFactoryCalls === 1) {
-        throw new Error(
-          "Failed to initialize: no supported payment kinds loaded from any facilitator.",
-        );
-      }
-
-      return async (_req, res) => {
-        res.status(418).json({ ok: true });
-      };
-    },
-  });
-
-  await withServer(app, async (baseUrl) => {
-    const response = await fetch(`${baseUrl}${canonicalPath}`, {
-      headers: {
-        "x-payment": "test",
-      },
-    });
-    const body = await response.json();
-
-    assert.equal(response.status, 418);
-    assert.deepEqual(body, { ok: true });
-    assert.equal(middlewareFactoryCalls, 2);
-  });
-});
-
-test("metrics feed records the generated route for the shared dashboard", async () => {
-  const app = createApp({
-    env: {},
-    facilitatorLoader: async () => createStubFacilitator(),
-  });
-  const primaryRoute = getPrimaryRoute();
-  const canonicalPath = buildRouteRequestPath(primaryRoute);
-
-  await withServer(app, async (baseUrl) => {
-    const apiResponse = await fetch(`${baseUrl}${canonicalPath}`);
-    assert.equal(apiResponse.status, 402);
-
-    const metricsResponse = await fetch(`${baseUrl}/ops/metrics/data`);
-    const summary = await metricsResponse.json();
-    const route = summary.routes.find((entry) => entry.key === primaryRoute.key);
-
-    assert.equal(metricsResponse.status, 200);
-    assert.ok(route, `Expected metrics for route ${primaryRoute.key}`);
-    assert.equal(route.paymentRequired, 1);
-    assert.equal(route.description, primaryRoute.description);
-    assert.equal(route.priceLabel, `$${primaryRoute.price} USDC`);
   });
 });
 
@@ -367,9 +258,9 @@ test("payment resource server registers the Bazaar discovery extension", () => {
   assert.equal(typeof recorded.settleFailureHandler, "function");
 });
 
-test("paid route only passes through the payment gate once", async () => {
+test("paid route only passes through the payment gate once and returns a wallet hit", async () => {
   let paymentGateCalls = 0;
-  const paymentGate = (req, res, next) => {
+  const paymentGate = (_req, _res, next) => {
     paymentGateCalls += 1;
     next();
   };
@@ -387,46 +278,26 @@ test("paid route only passes through the payment gate once", async () => {
         assert.equal(response.status, 200);
         assert.equal(paymentGateCalls, 1);
         assert.equal(body.success, true);
-        assert.equal(body.data.summary.status, "potential-match");
-        assert.equal(body.data.matches[0].primaryName, "AKTSIONERNE TOVARYSTVO SBERBANK");
-        assert.equal(body.data.sourceFreshness.sdnLastUpdated, "2026-03-13T00:00:00");
-        assert.equal(body.source, "OFAC Sanctions List Service");
+        assert.equal(body.data.summary.status, "match");
+        assert.equal(body.data.matches[0].entityName, "Lazarus Group");
+        assert.equal(body.data.matches[0].asset, "ETH");
+        assert.equal(body.data.sourceFreshness.sourceUrl, OFAC_SDN_ADVANCED_XML_URL);
+        assert.equal(body.report.report_meta.report_type, "ofac-wallet-screening");
+        assert.equal(body.report.result.summary.status, "match");
+        assert.equal(body.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+        assert.equal(body.artifacts.docx.endpoint, "/api/tools/report/docx/generate");
+        assert.match(
+          body.artifacts.pdf.recommended_local_path,
+          /outputs\/ofac-wallet-screen-0x098b716b8aaf21512996dc57eb0615e2383e2f96\.pdf$/,
+        );
+        assert.equal(body.source, "OFAC SDN Advanced XML");
       });
     },
     async (url) => {
-      if (url === OFAC_SEARCH_URL) {
-        return createJsonFetchResponse(200, [
-          {
-            id: 18715,
-            name: "AKTSIONERNE TOVARYSTVO SBERBANK",
-            address: "46 Volodymyrska street",
-            type: "Entity",
-            programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-            lists: "SDN; Non-SDN",
-            nameScore: 100,
-          },
-          {
-            id: 18715,
-            name: "JSC SBERBANK",
-            address: "46 Volodymyrska street",
-            type: "Entity",
-            programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-            lists: "SDN; Non-SDN",
-            nameScore: 100,
-          },
-        ]);
-      }
-
-      if (url === OFAC_SDN_LIST_URL) {
-        return createJsonFetchResponse(200, [
-          { fileName: "SDN_ENHANCED.XML", lastUpdated: "2026-03-13T00:00:00" },
-        ]);
-      }
-
-      if (url === OFAC_CONSOLIDATED_LIST_URL) {
-        return createJsonFetchResponse(200, [
-          { fileName: "CONS_ENHANCED.XML", lastUpdated: "2026-01-08T00:00:00" },
-        ]);
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
       }
 
       throw new Error(`Unexpected fetch URL in test: ${url}`);
@@ -434,46 +305,221 @@ test("paid route only passes through the payment gate once", async () => {
   );
 });
 
-test("vendor batch route summarizes multiple counterparties", async () => {
-  const paymentGate = (req, res, next) => next();
+test("paid route returns a clear result for an unsanctioned wallet", async () => {
+  const paymentGate = (_req, _res, next) => next();
 
   await withPatchedGlobalFetch(
     async () => {
       const app = createApp({ paymentGate });
-      const vendorBatchRoute = getVendorBatchRoute();
-      const canonicalPath = buildRouteRequestPath(vendorBatchRoute, { includeQuery: true });
 
       await withServer(app, async (baseUrl) => {
-        const response = await fetch(`${baseUrl}${canonicalPath}`);
+        const response = await fetch(
+          `${baseUrl}/api/ofac-wallet-screen/0x1111111111111111111111111111111111111111`,
+        );
         const body = await response.json();
 
         assert.equal(response.status, 200);
         assert.equal(body.success, true);
-        assert.equal(body.data.workflow, "vendor-onboarding");
-        assert.equal(body.data.summary.screenedCount, 3);
-        assert.equal(body.data.summary.flaggedCount, 3);
-        assert.equal(body.data.summary.recommendedAction, "pause-and-review");
-        assert.equal(body.data.counterparties[0].name, "SBERBANK");
+        assert.equal(body.data.summary.status, "clear");
+        assert.equal(body.data.summary.matchCount, 0);
+        assert.deepEqual(body.data.matches, []);
+        assert.equal(body.report.result.summary.status, "clear");
+        assert.equal(body.report.tables.wallet_screening_matches.rows[0].status, "clear");
       });
     },
-    async (url, options = {}) => {
-      if (url === OFAC_SEARCH_URL) {
-        const queryName = JSON.parse(options.body).name;
-        return createJsonFetchResponse(200, [
-          {
-            id: queryName.length,
-            name: queryName,
-            address: "123 Example Street",
-            type: "Entity",
-            programs: "RUSSIA-EO14024",
-            lists: "SDN",
-            nameScore: 100,
-          },
-        ]);
+    async (url) => {
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
       }
 
-      if (url === OFAC_SDN_LIST_URL || url === OFAC_CONSOLIDATED_LIST_URL) {
-        return createJsonFetchResponse(200, [{ lastUpdated: "2026-03-13T00:00:00" }]);
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  );
+});
+
+test("wallet sanctions workflow route accepts POST body input and returns a report-ready payload", async () => {
+  const paymentGate = (_req, _res, next) => next();
+
+  await withPatchedGlobalFetch(
+    async () => {
+      const app = createApp({ paymentGate });
+
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/workflows/compliance/wallet-sanctions-report`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            address: "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+            asset: "ETH",
+          }),
+        });
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.summary.status, "match");
+        assert.equal(body.data.summary.matchCount, 1);
+        assert.equal(body.report.report_meta.report_type, "ofac-wallet-screening");
+        assert.equal(body.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+        assert.equal(body.source, "OFAC SDN Advanced XML");
+      });
+    },
+    async (url) => {
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  );
+});
+
+test("batch wallet screening route accepts POST body input and returns a batch decision payload", async () => {
+  const paymentGate = (_req, _res, next) => next();
+
+  await withPatchedGlobalFetch(
+    async () => {
+      const app = createApp({ paymentGate });
+
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/workflows/compliance/batch-wallet-screen`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            addresses: [
+              "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+              "0x1111111111111111111111111111111111111111",
+            ],
+            asset: "ETH",
+          }),
+        });
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.summary.totalScreened, 2);
+        assert.equal(body.data.summary.matchCount, 1);
+        assert.equal(body.data.summary.clearCount, 1);
+        assert.equal(body.data.summary.workflowStatus, "manual_review_required");
+        assert.equal(body.report.report_meta.report_type, "ofac-wallet-screening-batch");
+        assert.equal(body.report.tables.batch_wallet_results.rows.length, 2);
+        assert.equal(body.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+        assert.equal(body.source, "OFAC SDN Advanced XML");
+      });
+    },
+    async (url) => {
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  );
+});
+
+test("EDD report route accepts case metadata and returns a workflow memo without legal approval language", async () => {
+  const paymentGate = (_req, _res, next) => next();
+
+  await withPatchedGlobalFetch(
+    async () => {
+      const app = createApp({ paymentGate });
+
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/workflows/compliance/edd-report`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            subject_name: "Northwind Treasury Counterparty",
+            case_name: "Counterparty onboarding review",
+            review_reason: "Treasury payout review",
+            jurisdiction: "US",
+            requested_by: "ops@northwind.example",
+            reference_id: "case-2026-04-07-001",
+            output_format: "json",
+            addresses: [
+              "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+              "0x1111111111111111111111111111111111111111",
+            ],
+            asset: "ETH",
+          }),
+        });
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.data.case.subjectName, "Northwind Treasury Counterparty");
+        assert.equal(body.data.workflowStatus, "manual_review_required");
+        assert.equal(body.data.screening.summary.matchCount, 1);
+        assert.ok(body.data.evidenceSummary.some((line) => /Lazarus Group/i.test(line)));
+        assert.ok(body.data.requiredFollowUp.some((line) => /human compliance reviewer/i.test(line)));
+        assert.equal(body.report.report_meta.report_type, "enhanced-due-diligence");
+        assert.equal(body.report.tables.case_metadata.rows[0].reference_id, "case-2026-04-07-001");
+        assert.equal(body.report.tables.screening_results.rows.length, 2);
+        assert.equal(body.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+        assert.equal(body.source, "OFAC SDN Advanced XML");
+      });
+    },
+    async (url) => {
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    },
+  );
+});
+
+test("EDD report route can bundle PDF artifact output in one call", async () => {
+  const paymentGate = (_req, _res, next) => next();
+
+  await withPatchedGlobalFetch(
+    async () => {
+      const app = createApp({ paymentGate });
+
+      await withServer(app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/api/workflows/compliance/edd-report`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            subject_name: "Northwind Treasury Counterparty",
+            case_name: "Counterparty onboarding review",
+            review_reason: "Treasury payout review",
+            jurisdiction: "US",
+            requested_by: "ops@northwind.example",
+            reference_id: "case-2026-04-07-002",
+            output_format: "pdf",
+            addresses: [
+              "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+              "0x1111111111111111111111111111111111111111",
+            ],
+            asset: "ETH",
+          }),
+        });
+        const body = await response.json();
+
+        assert.equal(response.status, 200);
+        assert.equal(body.success, true);
+        assert.equal(body.output_format, "pdf");
+        assert.equal(body.output.mimeType, "application/pdf");
+        assert.equal(typeof body.output.artifact.contentBase64, "string");
+        assert.ok(body.output.artifact.contentBase64.length > 100);
+        assert.equal(body.report.report_meta.report_type, "enhanced-due-diligence");
+        assert.equal(body.source, "OFAC SDN Advanced XML");
+      });
+    },
+    async (url) => {
+      if (url === OFAC_SDN_ADVANCED_XML_URL) {
+        return createTextFetchResponse(200, OFAC_WALLET_XML, {
+          "last-modified": "Sun, 06 Apr 2026 02:00:00 GMT",
+        });
       }
 
       throw new Error(`Unexpected fetch URL: ${url}`);

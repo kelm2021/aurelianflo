@@ -31,6 +31,7 @@ test("aurelianflo surface keeps the curated public core smaller than full discov
   assert.ok(!isAllowedAurelianFloRouteKey("GET /api/weather/current/*"));
   assert.ok(PUBLIC_CORE_DISCOVERY_ROUTE_KEYS.length < AURELIANFLO_ALLOWED_ROUTE_KEYS.length);
   assert.ok(isPublicCoreDiscoveryRouteKey("POST /api/workflows/compliance/edd-report"));
+  assert.ok(isPublicCoreDiscoveryRouteKey("POST /api/tools/report/pdf/generate"));
   assert.ok(!isPublicCoreDiscoveryRouteKey("POST /api/workflows/vendor/risk-forecast"));
 });
 

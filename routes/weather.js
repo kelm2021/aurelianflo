@@ -338,8 +338,8 @@ router.get("/api/weather/alerts/:state", async (req, res) => {
 
     const userAgentContact = String(process.env.UPSTREAM_CONTACT_EMAIL || "").trim();
     const userAgent = userAgentContact
-      ? `x402-data-bazaar/1.0 (${userAgentContact})`
-      : "x402-data-bazaar/1.0";
+      ? `aurelianflo/1.0 (${userAgentContact})`
+      : "aurelianflo/1.0";
     const response = await fetch(`https://api.weather.gov/alerts/active/area/${state}`, {
       headers: {
         Accept: "application/geo+json",

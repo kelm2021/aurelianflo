@@ -95,19 +95,6 @@ export function buildServerCapabilitiesPayload(baseUrl = PRODUCTION_BASE_URL) {
         outputFormats: ["json", "pdf", "docx"],
         summary: "Compliance workflow for exact-match OFAC wallet screening with structured JSON or document output.",
       },
-      {
-        id: "simulation_bundle",
-        label: "Simulation bundle",
-        tools: ["monte_carlo_report"],
-        outputFormats: ["json", "pdf", "docx"],
-        summary: "Monte Carlo reporting workflow with JSON, PDF, or DOCX output.",
-      },
-      {
-        id: "simulation_building_blocks",
-        label: "Simulation building blocks",
-        tools: ["monte_carlo_decision_report", "report_pdf_generate", "report_docx_generate"],
-        summary: "Structured report payload plus artifact generators for clients that want to render each step separately.",
-      },
     ],
     tools: {
       free: freeTools,

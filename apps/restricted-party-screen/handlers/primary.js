@@ -1,59 +1,121 @@
 const {
+  buildBatchScreeningResponse,
+  buildBundledEddResponse,
+  buildEddResponse,
   buildScreeningResponse,
-  clampInteger,
+  buildSourceFreshness,
   createHttpError,
-  DEFAULT_LIMIT,
-  DEFAULT_MIN_SCORE,
-  fetchSearchResults,
-  fetchSourceFreshness,
-  MAX_LIMIT,
+  loadWalletDataset,
+  normalizeAsset,
   normalizeString,
-  splitQueryValues,
+  screenWalletAddressesBatch,
+  screenWalletAddress,
 } = require("../lib/ofac");
 
 function parseScreeningQuery(req) {
-  const name = normalizeString(req.params?.name);
-  if (!name) {
-    throw createHttpError("A name path parameter is required.", 400);
+  const address = normalizeString(req.params?.address || req.body?.address);
+  if (!address) {
+    throw createHttpError("A wallet address is required.", 400);
   }
 
-  if (name.length < 2) {
-    throw createHttpError("The name path parameter must be at least 2 characters.", 400);
+  if (address.length < 10) {
+    throw createHttpError("The wallet address must be at least 10 characters.", 400);
   }
 
   return {
-    name,
-    minScore: clampInteger(req.query?.minScore, DEFAULT_MIN_SCORE, 50, 100),
-    limit: clampInteger(req.query?.limit, DEFAULT_LIMIT, 1, MAX_LIMIT),
-    type: normalizeString(req.query?.type),
-    country: normalizeString(req.query?.country),
-    city: normalizeString(req.query?.city),
-    address: normalizeString(req.query?.address),
-    idNumber: normalizeString(req.query?.idNumber),
-    stateProvince: normalizeString(req.query?.stateProvince),
-    programs: splitQueryValues(req.query?.program),
-    list: normalizeString(req.query?.list),
+    address,
+    asset: normalizeAsset(req.query?.asset || req.body?.asset),
   };
 }
 
+function parseBatchScreeningQuery(req) {
+  const addresses = Array.isArray(req.body?.addresses)
+    ? req.body.addresses.map((address) => normalizeString(address)).filter(Boolean)
+    : [];
+
+  if (!addresses.length) {
+    throw createHttpError("At least one wallet address is required.", 400);
+  }
+
+  return {
+    addresses,
+    asset: normalizeAsset(req.query?.asset || req.body?.asset),
+  };
+}
+
+function parseEddQuery(req) {
+  const subjectName = normalizeString(req.body?.subject_name);
+  if (!subjectName) {
+    throw createHttpError("A subject_name value is required for EDD reporting.", 400);
+  }
+
+  const addresses = Array.isArray(req.body?.addresses)
+    ? req.body.addresses.map((address) => normalizeString(address)).filter(Boolean)
+    : [];
+
+  if (!addresses.length) {
+    throw createHttpError("At least one wallet address is required.", 400);
+  }
+
+  const outputFormat = normalizeString(req.body?.output_format || req.query?.output_format).toLowerCase() || "json";
+  if (!["json", "pdf", "docx"].includes(outputFormat)) {
+    throw createHttpError("output_format must be one of json, pdf, or docx.", 400);
+  }
+
+  return {
+    subjectName,
+    caseName: normalizeString(req.body?.case_name),
+    reviewReason: normalizeString(req.body?.review_reason),
+    jurisdiction: normalizeString(req.body?.jurisdiction),
+    requestedBy: normalizeString(req.body?.requested_by),
+    referenceId: normalizeString(req.body?.reference_id),
+    outputFormat,
+    addresses,
+    asset: normalizeAsset(req.query?.asset || req.body?.asset),
+  };
+}
+
+function isBatchScreeningRequest(req) {
+  const routePath = String(req.route?.path || req.path || "");
+  return routePath.includes("batch-wallet-screen");
+}
+
+function isEddReportRequest(req) {
+  const routePath = String(req.route?.path || req.path || "");
+  return routePath.includes("edd-report");
+}
+
 function createPrimaryHandler(deps = {}) {
-  const searchResultsLoader = deps.fetchSearchResults ?? fetchSearchResults;
-  const freshnessLoader = deps.fetchSourceFreshness ?? fetchSourceFreshness;
+  const datasetLoader = deps.loadWalletDataset ?? loadWalletDataset;
 
   return async function primaryHandler(req, res) {
     try {
-      const query = parseScreeningQuery(req);
-      const [rawMatches, freshness] = await Promise.all([
-        searchResultsLoader(query),
-        freshnessLoader(),
-      ]);
+      const dataset = await datasetLoader();
+      const freshness = buildSourceFreshness(dataset);
 
-      res.json(buildScreeningResponse(query, rawMatches, freshness));
+      if (isBatchScreeningRequest(req)) {
+        const batch = screenWalletAddressesBatch(dataset, parseBatchScreeningQuery(req));
+        return res.json(buildBatchScreeningResponse(batch, freshness));
+      }
+
+      if (isEddReportRequest(req)) {
+        const caseContext = parseEddQuery(req);
+        const batch = screenWalletAddressesBatch(dataset, {
+          addresses: caseContext.addresses,
+          asset: caseContext.asset,
+        });
+        return res.json(
+          await buildBundledEddResponse(caseContext, batch, freshness, caseContext.outputFormat),
+        );
+      }
+
+      const screening = screenWalletAddress(dataset, parseScreeningQuery(req));
+      return res.json(buildScreeningResponse(screening, freshness));
     } catch (error) {
       const statusCode = error.statusCode ?? 502;
       res.status(statusCode).json({
         success: false,
-        error: error.message || "Restricted-party screening failed.",
+        error: error.message || "OFAC wallet screening failed.",
       });
     }
   };
@@ -61,4 +123,6 @@ function createPrimaryHandler(deps = {}) {
 
 module.exports = createPrimaryHandler();
 module.exports.createPrimaryHandler = createPrimaryHandler;
+module.exports.parseEddQuery = parseEddQuery;
+module.exports.parseBatchScreeningQuery = parseBatchScreeningQuery;
 module.exports.parseScreeningQuery = parseScreeningQuery;

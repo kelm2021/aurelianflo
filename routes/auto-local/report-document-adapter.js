@@ -306,13 +306,25 @@ function adaptReportToPdfPayload(report) {
 
   return {
     title: getReportTitle(body),
+    headlineMetrics: Array.isArray(body.headline_metrics)
+      ? body.headline_metrics
+        .filter((entry) => isPlainObject(entry))
+        .map((entry) => ({
+          label: readString(entry.label),
+          value: formatMetricValue(entry.value),
+          unit: readString(entry.unit),
+        }))
+      : [],
     executiveSummary: Array.isArray(body.executive_summary)
       ? body.executive_summary.map((entry) => readString(entry))
       : [],
     tables,
     metadata: {
+      subtitle: readString(body.report_meta?.subtitle || body.report_meta?.summary, ""),
       report_type: readString(body.report_meta?.report_type || "", ""),
       author: readString(body.report_meta?.author || "", ""),
+      date: readString(body.report_meta?.date || "", ""),
+      version: readString(body.report_meta?.version || "", ""),
       details: stableStringify(toObject(body.report_meta)),
     },
   };
@@ -323,12 +335,68 @@ function readRecommendedLocalPath(payload) {
   return readString(toObject(body.export_artifacts).recommended_local_path, "").trim();
 }
 
+function isLegacyReportPayload(payload) {
+  const body = toObject(payload);
+  return Boolean(
+    readString(body.title).trim()
+    && (
+      readString(body.subtitle).trim()
+      || readString(body.summary).trim()
+      || (Array.isArray(body.sections) && body.sections.length > 0)
+    ),
+  );
+}
+
+function adaptLegacyReportToPdfPayload(payload) {
+  const body = toObject(payload);
+  const sectionsInput = Array.isArray(body.sections) ? body.sections : [];
+
+  return {
+    title: readString(body.title, "Structured Report"),
+    headlineMetrics: Array.isArray(body.headline_metrics)
+      ? body.headline_metrics
+        .filter((entry) => isPlainObject(entry))
+        .map((entry) => ({
+          label: readString(entry.label),
+          value: formatMetricValue(entry.value),
+          unit: readString(entry.unit),
+        }))
+      : [],
+    executiveSummary: [
+      readString(body.subtitle).trim(),
+      readString(body.summary).trim(),
+    ].filter(Boolean),
+    sections: sectionsInput.map((section) => {
+      const normalized = toObject(section);
+      return {
+        heading: readString(normalized.heading || normalized.title, "Section"),
+        body: readString(normalized.body || normalized.text, ""),
+        bullets: Array.isArray(normalized.bullets)
+          ? normalized.bullets.map((entry) => readString(entry)).filter(Boolean)
+          : [],
+        table: Array.isArray(normalized.table)
+          ? normalized.table.filter((entry) => isPlainObject(entry)).map((entry) => ({ ...entry }))
+          : [],
+      };
+    }),
+    metadata: {
+      subtitle: readString(body.subtitle, ""),
+      report_type: readString(body.report_type || body.type, "report"),
+      date: readString(body.date || "", ""),
+      version: readString(body.version || "", ""),
+      details: stableStringify(body),
+    },
+  };
+}
+
 module.exports = {
   adaptReportToDocxPayload,
+  adaptLegacyReportToPdfPayload,
   adaptReportToPdfPayload,
   adaptReportToXlsxPayload,
   buildRecommendedLocalPath,
   extractStructuredReportPayload,
+  isLegacyReportPayload,
   isStructuredReportPayload,
   readRecommendedLocalPath,
   replaceExtension,

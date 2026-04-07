@@ -67,6 +67,7 @@ const {
 } = require("./lib/aurelianflo-profile");
 const {
   AURELIANFLO_ALLOWED_ROUTE_KEYS,
+  PUBLIC_CORE_DISCOVERY_ROUTE_KEYS,
   buildAllowedRouteKeySet,
   buildPublicCoreRouteKeySet,
 } = require("./lib/aurelianflo-surface");
@@ -1068,6 +1069,7 @@ const DOCUMENT_ARTIFACT_RESPONSE_SCHEMA = {
 
 const GENERATED_DOCUMENT_ROUTE_OVERRIDES = {
   "POST /api/tools/report/generate": {
+    price: "0.05",
     description: "Generate a styled report PDF from the shared report model or a legacy report payload with title, summary, sections, and headline metrics.",
     inputExample: {
       report_meta: { report_type: "ops-brief", title: "Weekly Ops Brief", author: "AurelianFlo" },
@@ -1148,7 +1150,7 @@ const GENERATED_DOCUMENT_ROUTE_ALIASES = [
     aliasKey: "POST /api/tools/report/pdf/generate",
     aliasPath: "/api/tools/report/pdf/generate",
     override: {
-      price: "0.2",
+      price: "0.05",
       description: "Generate a styled PDF report from the shared report model or a legacy report payload.",
       inputExample: GENERATED_DOCUMENT_ROUTE_OVERRIDES["POST /api/tools/report/generate"].inputExample,
       inputSchema: GENERATED_DOCUMENT_ROUTE_OVERRIDES["POST /api/tools/report/generate"].inputSchema,
@@ -1161,7 +1163,7 @@ const GENERATED_DOCUMENT_ROUTE_ALIASES = [
     aliasKey: "POST /api/tools/report/docx/generate",
     aliasPath: "/api/tools/report/docx/generate",
     override: {
-      price: "0.16",
+      price: "0.06",
       description: "Generate a report DOCX from the shared report model with report-aware structure and styling.",
       inputExample: {
         report_meta: { report_type: "board-update", title: "Board Update", author: "AurelianFlo" },
@@ -1184,7 +1186,7 @@ const GENERATED_DOCUMENT_ROUTE_ALIASES = [
     aliasKey: "POST /api/tools/report/xlsx/generate",
     aliasPath: "/api/tools/report/xlsx/generate",
     override: {
-      price: "0.16",
+      price: "0.07",
       description: "Generate a report XLSX workbook from the shared report model with spreadsheet-friendly tabs and tables.",
       inputExample: {
         report_meta: { report_type: "ops-workbook", title: "Ops Workbook", author: "AurelianFlo" },
@@ -1261,15 +1263,15 @@ const GENERATED_DOCUMENT_ROUTE_ALIASES = [
     },
   },
 ];
-const FULL_DISCOVERY_ROUTE_KEYS = buildAllowedRouteKeySet();
+const FULL_DISCOVERY_ROUTE_KEYS = buildPublicCoreRouteKeySet();
 const PUBLIC_CORE_DISCOVERY_ROUTE_KEYS_SET = buildPublicCoreRouteKeySet();
 const FLAGSHIP_ROUTE_ORDER = [
   "POST /api/workflows/compliance/edd-report",
   "POST /api/workflows/compliance/batch-wallet-screen",
   "GET /api/ofac-wallet-screen/:address",
-  "POST /api/sim/report",
   "POST /api/tools/report/pdf/generate",
   "POST /api/tools/report/docx/generate",
+  "POST /api/tools/report/xlsx/generate",
 ];
 const FLAGSHIP_ROUTE_KEYS = new Set(FLAGSHIP_ROUTE_ORDER);
 const FLAGSHIP_ROUTE_EDITORIAL = {
@@ -1300,15 +1302,6 @@ const FLAGSHIP_ROUTE_EDITORIAL = {
     proof:
       "Returns exact hit or clear status, sanctioned entity metadata, source freshness, and a structured report payload ready for PDF or DOCX rendering.",
   },
-  "POST /api/sim/report": {
-    discipline: "Decision Analysis",
-    sequence: "02",
-    title: "Monte Carlo decision report",
-    summary:
-      "Turn any supported simulation workflow into an analyst-ready report with executive summary, headline metrics, and spreadsheet-friendly tables.",
-    proof:
-      "Best when the decision depends on scenarios, uncertainty, or tradeoffs instead of a deterministic compliance result.",
-  },
   "POST /api/tools/report/pdf/generate": {
     discipline: "Documents",
     sequence: "03A",
@@ -1326,6 +1319,15 @@ const FLAGSHIP_ROUTE_EDITORIAL = {
       "Render the same wallet-screening report payload into a Word-native deliverable for editing, markup, and client-side revision.",
     proof:
       "Best when the report needs editing, markup, or revision in a standard document workflow.",
+  },
+  "POST /api/tools/report/xlsx/generate": {
+    discipline: "Documents",
+    sequence: "03C",
+    title: "Report XLSX generation",
+    summary:
+      "Render the shared report payload into a workbook for spreadsheet handoff, tracking, and downstream analysis.",
+    proof:
+      "Best when the compliance workflow needs tabular review, evidence packing, or workbook-native handoff.",
   },
 };
 const ROUTE_DOC_RELATED_LINKS = {
@@ -1665,15 +1667,6 @@ function createGeneratedCatalogRouteConfig(payTo = PAY_TO, options = {}) {
 
 function shouldIncludeRouteInDiscovery(routeKey, options = {}) {
   const scope = String(options.discoveryScope || "full").toLowerCase();
-  const env = options.env || process.env;
-  if (!isProductionRuntime(env)) {
-    if (scope === "public") {
-      return PUBLIC_CORE_DISCOVERY_ROUTE_KEYS_SET.has(routeKey);
-    }
-
-    return true;
-  }
-
   if (scope === "public") {
     return PUBLIC_CORE_DISCOVERY_ROUTE_KEYS_SET.has(routeKey);
   }
@@ -3911,6 +3904,7 @@ function buildWellKnownManifest(manifest = WELL_KNOWN_X402_AURELIAN, routes = ro
   const metadata = getOriginMetadata(env);
   const hiddenRouteMatchers = options.hiddenRouteMatchers || buildHiddenRouteMatchers();
   const includeBundledSellerResources = options.includeBundledSellerResources !== false;
+  const appendSimInstructions = options.appendSimInstructions !== false;
   const staticResources = Array.isArray(manifest?.resources)
     ? manifest.resources.filter(
         (resourceUrl) => !shouldHideResourceUrlInProduction(resourceUrl, { env, hiddenRouteMatchers }),
@@ -3933,7 +3927,9 @@ function buildWellKnownManifest(manifest = WELL_KNOWN_X402_AURELIAN, routes = ro
     icon: `${CANONICAL_BASE_URL}/favicon.ico`,
     resources,
     ownershipProofs,
-    instructions: appendSimComposabilityInstructions(manifest?.instructions),
+    instructions: appendSimInstructions
+      ? appendSimComposabilityInstructions(manifest?.instructions)
+      : String(manifest?.instructions || ""),
     endpointCount: endpoints.length,
     pricing: summarizePricing(endpoints),
     rateLimits: {
@@ -5306,7 +5302,7 @@ function buildOriginLandingHtml(options = {}) {
           </div>
           <div class="signal-stat">
             <strong>Reports</strong>
-            <span>EDD memos, screening reports, and Monte Carlo decision memos.</span>
+            <span>EDD memos, screening packets, and review-ready report artifacts.</span>
           </div>
           <div class="signal-stat">
             <strong>Documents</strong>
@@ -5324,7 +5320,7 @@ function buildOriginLandingHtml(options = {}) {
       <div class="section-rule"></div>
       <div class="section-header">
         <h2 class="section-title">Core services.</h2>
-        <p class="section-copy">Compliance and decision analysis, then document output.</p>
+        <p class="section-copy">Compliance review, wallet screening, and document output.</p>
       </div>
       <div class="discipline-grid">
         <article class="discipline">
@@ -5346,21 +5342,21 @@ function buildOriginLandingHtml(options = {}) {
           </ul>
         </article>
         <article class="discipline">
-          <div class="discipline-label">03 / Decision Analysis</div>
-          <h3>Monte Carlo reports.</h3>
+          <div class="discipline-label">03 / Compliance</div>
+          <h3>Single-wallet report bundle.</h3>
           <ul>
-            <li>Lead endpoint: POST /api/sim/report</li>
-            <li>Structured decision memo from supported simulation workflows</li>
-            <li>Executive summary, metrics, and structured tables</li>
+            <li>Lead endpoint: POST /api/workflows/compliance/wallet-sanctions-report</li>
+            <li>One-wallet screening with a reusable report payload underneath</li>
+            <li>Useful when you want a screening packet before final artifact rendering</li>
           </ul>
         </article>
         <article class="discipline">
           <div class="discipline-label">04 / Documents</div>
           <h3>Report artifacts.</h3>
           <ul>
-            <li>Lead endpoints: POST /api/tools/report/pdf/generate and POST /api/tools/report/docx/generate</li>
-            <li>Fixed-layout and editable handoff artifacts</li>
-            <li>Used directly for building-block workflows and legacy report payloads</li>
+            <li>Lead endpoints: POST /api/tools/report/pdf/generate, POST /api/tools/report/docx/generate, and POST /api/tools/report/xlsx/generate</li>
+            <li>Fixed-layout, editable, and workbook handoff artifacts</li>
+            <li>Used directly for compliance workflows and retained report payloads</li>
           </ul>
         </article>
       </div>
@@ -5374,15 +5370,15 @@ function buildOriginLandingHtml(options = {}) {
           <div class="list-grid">
             <div class="list-row">
               <strong>Scope</strong>
-              <span>EDD memos, wallet screening, Monte Carlo decision analysis, and document generation.</span>
+              <span>EDD memos, wallet screening, and document generation.</span>
             </div>
             <div class="list-row">
               <strong>Flow</strong>
-              <span>Review, screen, model, deliver.</span>
+              <span>Review, screen, document, deliver.</span>
             </div>
             <div class="list-row">
               <strong>Output</strong>
-              <span>JSON, PDF, and DOCX.</span>
+              <span>JSON, PDF, DOCX, and XLSX.</span>
             </div>
           </div>
         </article>
@@ -6038,8 +6034,8 @@ function buildApiDiscoveryHtml(options = {}) {
               <span><code>/api/workflows/compliance/edd-report</code> returns a reviewable memo as JSON, PDF, or DOCX.</span>
             </div>
             <div class="bullet">
-              <strong>Decision reports</strong>
-              <span><code>/api/sim/report</code> turns supported simulation workflows into analyst-ready memos.</span>
+              <strong>Screening reports</strong>
+              <span><code>/api/workflows/compliance/wallet-sanctions-report</code> bundles one-wallet screening into a report-ready payload.</span>
             </div>
             <div class="bullet">
               <strong>Document output</strong>
@@ -6061,7 +6057,7 @@ function buildApiDiscoveryHtml(options = {}) {
             <a href="${fullDiscoveryUrl}" rel="nofollow">
               <div>
                 <small>Full JSON</small>
-                <span>Full discovery inventory.</span>
+                <span>Machine-readable inventory for the current public surface.</span>
               </div>
               <b>FULL</b>
             </a>
@@ -6100,7 +6096,7 @@ function createAurelianFloMcpDocsHandler() {
     const html = buildMcpDocHtml({
       title: "AurelianFlo",
       summary:
-        "Pay-per-call MCP tools for OFAC screening, vendor diligence, Monte Carlo reporting, finance scenario workflows, and document output. Start with server_capabilities and use the direct origin for paid execution.",
+        "Pay-per-call MCP tools anchored around EDD memos, OFAC screening, and document output. Retained Monte Carlo tools remain callable directly. Start with server_capabilities and use the direct origin for paid execution.",
       links: [
         { label: "MCP Endpoint", value: `${baseUrl}/mcp`, href: `${baseUrl}/mcp` },
         {
@@ -6130,9 +6126,9 @@ function createAurelianFloMcpDocsHandler() {
           heading: "Bundles",
           items: [
             "Compliance bundle: edd_report turns a wallet set plus case metadata into a reviewable memo with json, pdf, or docx output, and batch_wallet_screen handles the lower-level batch screening pass.",
-            "Decision-analysis bundle: monte_carlo_report returns the simulation report plus json, pdf, or docx output in one call.",
             "Building blocks: edd_report or batch_wallet_screen plus report_pdf_generate or report_docx_generate remains available for compliance clients that want to control the artifact step.",
-            "Simulation building blocks: monte_carlo_decision_report plus report_pdf_generate or report_docx_generate remains available for clients that want to control each step.",
+            "Retained decision-analysis bundle: monte_carlo_report still returns the simulation report plus json, pdf, or docx output for callers that already know that lane.",
+            "Retained simulation building blocks: monte_carlo_decision_report plus report_pdf_generate or report_docx_generate remains available for clients that want to control each step.",
           ],
         },
         {
@@ -7281,8 +7277,13 @@ function createWellKnownX402AurelianHandler(
   options = {},
 ) {
   const env = options.env || process.env;
+  const publicRoutes = selectRoutes(PUBLIC_CORE_DISCOVERY_ROUTE_KEYS, routes);
   return function wellKnownX402AurelianHandler(_req, res) {
-    res.json(buildWellKnownManifest(manifest, routes, { env }));
+    res.json(buildWellKnownManifest(manifest, publicRoutes, {
+      env,
+      includeBundledSellerResources: false,
+      appendSimInstructions: false,
+    }));
   };
 }
 
@@ -7319,17 +7320,16 @@ function buildCoreWellKnownX402Manifest(routes = routeConfig, options = {}) {
   return buildWellKnownManifest(
     {
       ...WELL_KNOWN_X402_AURELIAN,
-      description: "Core AurelianFlo tools for OFAC screening, due diligence memos, Monte Carlo decision reports, and document output.",
+      description: "Core AurelianFlo tools for EDD memos, OFAC screening, and document output.",
       resources,
       instructions: [
         "# AurelianFlo Core Tools",
         "",
         "- Enhanced due diligence memos",
         "- Batch and single-wallet OFAC screening",
-        "- Monte Carlo decision reports",
-        "- Report PDF and DOCX generation",
+        "- Report PDF, DOCX, and XLSX generation",
         "",
-        "For the broader machine-readable inventory, use GET /api or /.well-known/x402-aurelian.json.",
+        "For the current buyer-facing machine-readable inventory, use GET /api or /.well-known/x402-aurelian.json.",
       ].join("\n"),
     },
     coreRoutes,
@@ -7337,6 +7337,7 @@ function buildCoreWellKnownX402Manifest(routes = routeConfig, options = {}) {
       env,
       includeBundledSellerResources: false,
       precomputedEndpoints: endpoints,
+      appendSimInstructions: false,
     },
   );
 }
@@ -7495,8 +7496,6 @@ function createApp(options = {}) {
   const restrictedPartyPaymentsMcpIntegrationHandler =
     options.restrictedPartyPaymentsMcpIntegrationHandler
     || createRestrictedPartyPaymentsMcpIntegrationHandler(createRestrictedPartyRouteConfig(payTo));
-  app.use(express.json());
-  app.use(createSimCompatibleResponseMiddleware());
 
   // Trust Vercel's proxy so req.protocol returns "https" instead of "http".
   app.set("trust proxy", 1);
@@ -7554,6 +7553,8 @@ function createApp(options = {}) {
       network: "base",
     }),
   );
+  app.use(express.json());
+  app.use(createSimCompatibleResponseMiddleware());
   if (enableOpsDashboards) {
     app.get(
       "/ops/metrics",

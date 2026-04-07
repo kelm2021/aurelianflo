@@ -7,7 +7,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_LIMIT = 3;
 const MAX_LIMIT = 5;
 const USER_AGENT =
-  "vendor-entity-brief/1.0 (+https://vendor-entity-brief.vercel.app)";
+  "aurelianflo-vendor/1.0 (+https://x402.aurelianflo.com)";
 
 function normalizeComparisonString(value) {
   return normalizeString(value)

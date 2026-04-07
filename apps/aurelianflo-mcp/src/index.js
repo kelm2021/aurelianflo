@@ -91,8 +91,8 @@ export function createAurelianFloMcpHandler(options = {}) {
       }
     },
     {
-      name: "AurelianFlo MCP",
-      version: "0.1.0",
+      name: "AurelianFlo",
+      version: "0.1.1",
       icons: [
         {
           src: "https://x402.aurelianflo.com/icon.png",

@@ -17,7 +17,7 @@ export const SERVER_CARD = {
     name: "AurelianFlo",
     version: "0.1.1",
     description:
-      "Pay-per-call MCP tools for compliance screening, vendor diligence, Monte Carlo decision analysis, and document output.",
+      "Pay-per-call MCP tools for EDD memos, OFAC screening, and document output, with retained Monte Carlo reporting tools.",
     homepage: `${PRODUCTION_BASE_URL}/mcp/docs`,
     iconUrl: `${PRODUCTION_BASE_URL}/icon.png`,
     icons: [

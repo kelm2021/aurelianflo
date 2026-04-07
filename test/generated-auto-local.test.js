@@ -1647,14 +1647,6 @@ test("generated document routes are published in discovery and OpenAPI", async (
       "expected report generator in /api discovery",
     );
     assert.ok(
-      discovery.catalog.some((entry) => entry.path === "/api/tools/docx/generate"),
-      "expected DOCX generator in /api discovery",
-    );
-    assert.ok(
-      discovery.catalog.some((entry) => entry.path === "/api/tools/xlsx/generate"),
-      "expected XLSX generator in /api discovery",
-    );
-    assert.ok(
       discovery.catalog.some((entry) => entry.path === "/api/tools/report/pdf/generate"),
       "expected report PDF generator in /api discovery",
     );
@@ -1667,16 +1659,16 @@ test("generated document routes are published in discovery and OpenAPI", async (
       "expected report XLSX generator in /api discovery",
     );
     assert.ok(
-      discovery.catalog.some((entry) => entry.path === "/api/tools/pdf/render-html"),
-      "expected max-fidelity PDF renderer in /api discovery",
+      !discovery.catalog.some((entry) => entry.path === "/api/tools/docx/generate"),
+      "direct DOCX generator should stay live without appearing in primary discovery",
     );
     assert.ok(
-      discovery.catalog.some((entry) => entry.path === "/api/tools/docx/render-template"),
-      "expected template DOCX renderer in /api discovery",
+      !discovery.catalog.some((entry) => entry.path === "/api/tools/xlsx/generate"),
+      "direct XLSX generator should stay live without appearing in primary discovery",
     );
     assert.ok(
-      discovery.catalog.some((entry) => entry.path === "/api/tools/xlsx/render-template"),
-      "expected template XLSX renderer in /api discovery",
+      !discovery.catalog.some((entry) => entry.path === "/api/tools/pdf/render-html"),
+      "max-fidelity PDF renderer should stay live without appearing in primary discovery",
     );
 
     const openApiResponse = await fetch(`${baseUrl}/openapi.json`);
@@ -1684,28 +1676,16 @@ test("generated document routes are published in discovery and OpenAPI", async (
 
     assert.equal(openApiResponse.status, 200);
     const reportRequestSchema = openApi.paths["/api/tools/report/generate"].post.requestBody.content["application/json"].schema;
-    const docxRequestSchema = openApi.paths["/api/tools/docx/generate"].post.requestBody.content["application/json"].schema;
-    const xlsxRequestSchema = openApi.paths["/api/tools/xlsx/generate"].post.requestBody.content["application/json"].schema;
     const reportPdfRequestSchema = openApi.paths["/api/tools/report/pdf/generate"].post.requestBody.content["application/json"].schema;
     const reportDocxRequestSchema = openApi.paths["/api/tools/report/docx/generate"].post.requestBody.content["application/json"].schema;
     const reportXlsxRequestSchema = openApi.paths["/api/tools/report/xlsx/generate"].post.requestBody.content["application/json"].schema;
-    const renderHtmlRequestSchema = openApi.paths["/api/tools/pdf/render-html"].post.requestBody.content["application/json"].schema;
-    const renderTemplateDocxSchema = openApi.paths["/api/tools/docx/render-template"].post.requestBody.content["application/json"].schema;
-    const renderTemplateXlsxSchema = openApi.paths["/api/tools/xlsx/render-template"].post.requestBody.content["application/json"].schema;
     const reportResponseSchema = openApi.paths["/api/tools/report/generate"].post.responses["200"].content["application/json"].schema;
 
     assert.ok(schemaIncludesRequiredProperty(reportRequestSchema, "report_meta"));
     assert.ok(schemaIncludesRequiredProperty(reportRequestSchema, "tables"));
-    assert.ok(schemaIncludesRequiredProperty(docxRequestSchema, "report_meta"));
-    assert.ok(schemaIncludesRequiredProperty(docxRequestSchema, "sections"));
-    assert.ok(schemaIncludesRequiredProperty(xlsxRequestSchema, "report_meta"));
-    assert.ok(schemaIncludesRequiredProperty(xlsxRequestSchema, "sheets"));
     assert.ok(schemaIncludesRequiredProperty(reportPdfRequestSchema, "report_meta"));
     assert.ok(schemaIncludesRequiredProperty(reportDocxRequestSchema, "report_meta"));
     assert.ok(schemaIncludesRequiredProperty(reportXlsxRequestSchema, "report_meta"));
-    assert.ok(schemaIncludesRequiredProperty(renderHtmlRequestSchema, "html"));
-    assert.ok(schemaIncludesRequiredProperty(renderTemplateDocxSchema, "template"));
-    assert.ok(schemaIncludesRequiredProperty(renderTemplateXlsxSchema, "template"));
     assert.ok(schemaHasArtifactEnvelope(reportResponseSchema));
   });
 });
@@ -1809,23 +1789,25 @@ test("legacy system discovery and OpenAPI aliases resolve to curated live route 
     const fullDiscovery = await fullDiscoveryResponse.json();
     assert.equal(fullDiscoveryResponse.status, 200);
     assert.ok(Array.isArray(fullDiscovery.catalog));
-    assert.ok(fullDiscovery.catalog.some((entry) => entry.path === "/api/tools/xlsx/generate"));
+    assert.ok(fullDiscovery.catalog.some((entry) => entry.path === "/api/tools/report/xlsx/generate"));
     assert.ok(!fullDiscovery.catalog.some((entry) => entry.path === "/api/weather/current"));
     assert.ok(!fullDiscovery.catalog.some((entry) => entry.path === "/api/tools/contract/generate"));
+    assert.ok(!fullDiscovery.catalog.some((entry) => entry.path === "/api/workflows/finance/cash-runway-forecast"));
 
     const openApiResponse = await fetch(`${baseUrl}/api/system/openapi.json`);
     const openApi = await openApiResponse.json();
     assert.equal(openApiResponse.status, 200);
-    assert.ok(openApi.paths["/api/tools/docx/generate"]?.post);
-    assert.ok(openApi.paths["/api/tools/pdf/render-html"]?.post);
+    assert.ok(openApi.paths["/api/tools/report/docx/generate"]?.post);
+    assert.ok(!openApi.paths["/api/tools/pdf/render-html"]?.post);
 
     const fullOpenApiResponse = await fetch(`${baseUrl}/openapi-full.json`);
     const fullOpenApi = await fullOpenApiResponse.json();
     assert.equal(fullOpenApiResponse.status, 200);
     assert.ok(fullOpenApi.paths["/api/tools/report/generate"]?.post);
-    assert.ok(fullOpenApi.paths["/api/tools/xlsx/render-template"]?.post);
+    assert.ok(fullOpenApi.paths["/api/tools/report/xlsx/generate"]?.post);
     assert.ok(!fullOpenApi.paths["/api/weather/current"]);
     assert.ok(!fullOpenApi.paths["/api/tools/contract/generate"]?.post);
+    assert.ok(!fullOpenApi.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
   });
 });
 
@@ -1855,31 +1837,10 @@ test("public discovery surfaces stay curated while system discovery exposes the 
       "POST /api/workflows/compliance/edd-report",
       "POST /api/workflows/compliance/batch-wallet-screen",
       "POST /api/workflows/compliance/wallet-sanctions-report",
-      "GET /api/vendor-entity-brief",
-      "POST /api/workflows/finance/cash-runway-forecast",
-      "POST /api/workflows/finance/startup-runway-forecast",
-      "POST /api/workflows/finance/pricing-plan-compare",
-      "POST /api/workflows/finance/pricing-sensitivity-report",
-      "POST /api/workflows/vendor/risk-assessment",
-      "POST /api/workflows/vendor/due-diligence-report",
-      "POST /api/sim/probability",
-      "POST /api/sim/batch-probability",
-      "POST /api/sim/compare",
-      "POST /api/sim/sensitivity",
-      "POST /api/sim/forecast",
-      "POST /api/sim/composed",
-      "POST /api/sim/optimize",
-      "POST /api/sim/report",
       "POST /api/tools/report/generate",
       "POST /api/tools/report/pdf/generate",
       "POST /api/tools/report/docx/generate",
       "POST /api/tools/report/xlsx/generate",
-      "POST /api/tools/docx/generate",
-      "POST /api/tools/xlsx/generate",
-      "POST /api/tools/pdf/generate",
-      "POST /api/tools/pdf/render-html",
-      "POST /api/tools/docx/render-template",
-      "POST /api/tools/xlsx/render-template",
     ]);
 
     assert.deepEqual(new Set([...publicRouteKeys].sort()), new Set([...expectedPublicRouteKeys].sort()));
@@ -1887,12 +1848,15 @@ test("public discovery surfaces stay curated while system discovery exposes the 
     assert.ok(!publicRouteKeys.has("GET /api/tools/misc/iching"));
     assert.ok(!publicRouteKeys.has("POST /api/tools/contract/generate"));
     assert.ok(!publicRouteKeys.has("GET /api/weather/current/*"));
-    assert.ok(fullRouteKeys.has("POST /api/workflows/vendor/risk-forecast"));
-    assert.ok(fullRouteKeys.has("POST /api/workflows/finance/pricing-scenario-forecast"));
+    assert.ok(!publicRouteKeys.has("POST /api/sim/report"));
+    assert.ok(!publicRouteKeys.has("GET /api/vendor-entity-brief"));
+    assert.ok(!publicRouteKeys.has("POST /api/workflows/finance/cash-runway-forecast"));
+    assert.ok(!fullRouteKeys.has("POST /api/workflows/vendor/risk-forecast"));
+    assert.ok(!fullRouteKeys.has("POST /api/workflows/finance/pricing-scenario-forecast"));
     assert.ok(!fullRouteKeys.has("POST /api/tools/design/icon"));
     assert.ok(!fullRouteKeys.has("GET /api/tools/misc/iching"));
     assert.ok(!fullRouteKeys.has("GET /api/weather/current/*"));
-    assert.ok(fullDiscovery.catalog.length > publicDiscovery.catalog.length);
+    assert.equal(fullDiscovery.catalog.length, publicDiscovery.catalog.length);
 
     const publicOpenApiResponse = await fetch(`${baseUrl}/openapi.json`);
     const publicOpenApi = await publicOpenApiResponse.json();
@@ -1905,58 +1869,35 @@ test("public discovery surfaces stay curated while system discovery exposes the 
       publicOpenApi.info.title,
       "AurelianFlo",
     );
-    assert.match(publicOpenApi.info.description, /vendor diligence/i);
-    assert.match(publicOpenApi.info.description, /finance scenario workflows/i);
-    assert.match(publicOpenApi.info.description, /PDF, DOCX, XLSX/i);
+    assert.match(publicOpenApi.info.description, /enhanced due diligence memos/i);
+    assert.match(publicOpenApi.info.description, /OFAC wallet screening/i);
+    assert.match(publicOpenApi.info.description, /audit-ready document output \(PDF, DOCX, XLSX\)/i);
     assert.ok(publicOpenApi.paths["/api/tools/report/generate"]?.post);
     assert.ok(publicOpenApi.paths["/api/tools/report/pdf/generate"]?.post);
     assert.ok(publicOpenApi.paths["/api/tools/report/docx/generate"]?.post);
     assert.ok(publicOpenApi.paths["/api/tools/report/xlsx/generate"]?.post);
-    assert.ok(publicOpenApi.paths["/api/tools/pdf/render-html"]?.post);
-    assert.ok(publicOpenApi.paths["/api/tools/docx/render-template"]?.post);
-    assert.ok(publicOpenApi.paths["/api/tools/xlsx/render-template"]?.post);
     assert.ok(publicOpenApi.paths["/api/workflows/compliance/wallet-sanctions-report"]?.post);
-    assert.ok(publicOpenApi.paths["/api/vendor-entity-brief"]?.get);
-    assert.ok(publicOpenApi.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
-    assert.ok(publicOpenApi.paths["/api/workflows/finance/startup-runway-forecast"]?.post);
-    assert.ok(publicOpenApi.paths["/api/workflows/finance/pricing-plan-compare"]?.post);
-    assert.ok(publicOpenApi.paths["/api/workflows/finance/pricing-sensitivity-report"]?.post);
-    assert.ok(publicOpenApi.paths["/api/workflows/vendor/risk-assessment"]?.post);
-    assert.ok(publicOpenApi.paths["/api/workflows/vendor/due-diligence-report"]?.post);
-    assert.ok(publicOpenApi.paths["/api/sim/probability"]?.post);
+    assert.ok(!publicOpenApi.paths["/api/vendor-entity-brief"]?.get);
+    assert.ok(!publicOpenApi.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
+    assert.ok(!publicOpenApi.paths["/api/workflows/vendor/risk-assessment"]?.post);
+    assert.ok(!publicOpenApi.paths["/api/sim/probability"]?.post);
     assert.ok(!publicOpenApi.paths["/api/tools/design/icon"]?.post);
     assert.ok(!publicOpenApi.paths["/api/weather/current/{param1}"]?.get);
     assert.ok(!publicOpenApi.paths["/api/tools/contract/generate"]?.post);
-    assert.ok(fullOpenApi.paths["/api/workflows/vendor/risk-forecast"]?.post);
-    assert.ok(fullOpenApi.paths["/api/workflows/finance/pricing-scenario-forecast"]?.post);
+    assert.ok(!fullOpenApi.paths["/api/workflows/vendor/risk-forecast"]?.post);
+    assert.ok(!fullOpenApi.paths["/api/workflows/finance/pricing-scenario-forecast"]?.post);
     assert.ok(!fullOpenApi.paths["/api/tools/design/icon"]?.post);
     assert.match(
       publicOpenApi.paths["/api/workflows/compliance/wallet-sanctions-report"]?.post?.summary || "",
       /crypto payment review/i,
     );
     assert.match(
-      publicOpenApi.paths["/api/workflows/vendor/due-diligence-report"]?.post?.summary || "",
-      /supplier onboarding/i,
-    );
-    assert.match(
-      publicOpenApi.paths["/api/workflows/finance/startup-runway-forecast"]?.post?.summary || "",
-      /founder- and investor-ready/i,
-    );
-    assert.match(
-      publicOpenApi.paths["/api/tools/pdf/generate"]?.post?.summary || "",
-      /client deliverables/i,
-    );
-    assert.doesNotMatch(
       publicOpenApi.paths["/api/workflows/compliance/edd-report"]?.post?.summary || "",
-      /workflow-safe/i,
+      /enhanced due diligence memo/i,
     );
-    assert.doesNotMatch(
+    assert.match(
       publicOpenApi.paths["/api/tools/report/pdf/generate"]?.post?.summary || "",
-      /premium|workbook-ready/i,
-    );
-    assert.doesNotMatch(
-      publicOpenApi.paths["/api/tools/report/xlsx/generate"]?.post?.summary || "",
-      /premium|workbook-ready/i,
+      /styled pdf report/i,
     );
   });
 });
@@ -1979,24 +1920,12 @@ test("public OpenAPI exposes structured workflow output schemas for curated work
       publicOpenApi.paths["/api/workflows/compliance/edd-report"]?.post?.responses?.["200"]?.content?.["application/json"]?.schema;
     const batchWorkflowSchema =
       publicOpenApi.paths["/api/workflows/compliance/batch-wallet-screen"]?.post?.responses?.["200"]?.content?.["application/json"]?.schema;
-    const pricingWorkflowSchema =
-      publicOpenApi.paths["/api/workflows/finance/pricing-plan-compare"]?.post?.responses?.["200"]?.content?.["application/json"]?.schema;
-    const vendorWorkflowSchema =
-      publicOpenApi.paths["/api/workflows/vendor/risk-assessment"]?.post?.responses?.["200"]?.content?.["application/json"]?.schema;
-
     assert.ok(schemaIncludesRequiredProperty(eddWorkflowSchema, "type"));
     assert.ok(Object.prototype.hasOwnProperty.call(eddWorkflowSchema?.properties || {}, "example"));
 
     assert.ok(schemaIncludesRequiredProperty(batchWorkflowSchema, "type"));
     assert.ok(Object.prototype.hasOwnProperty.call(batchWorkflowSchema?.properties || {}, "example"));
-
-    assert.ok(schemaIncludesRequiredProperty(pricingWorkflowSchema, "workflow_meta"));
-    assert.ok(schemaIncludesRequiredProperty(pricingWorkflowSchema, "summary"));
-    assert.ok(schemaIncludesRequiredProperty(pricingWorkflowSchema, "scenarios"));
-
-    assert.ok(schemaIncludesRequiredProperty(vendorWorkflowSchema, "workflow_meta"));
-    assert.ok(schemaIncludesRequiredProperty(vendorWorkflowSchema, "summary"));
-    assert.ok(schemaIncludesRequiredProperty(vendorWorkflowSchema, "vendors"));
+    assert.ok(schemaHasArtifactEnvelope(publicOpenApi.paths["/api/tools/report/pdf/generate"]?.post?.responses?.["200"]?.content?.["application/json"]?.schema));
   });
 });
 
@@ -2013,15 +1942,15 @@ test("root app publishes and serves the cash runway workflow route", async () =>
     const discovery = await discoveryResponse.json();
     assert.equal(discoveryResponse.status, 200);
     assert.ok(
-      discovery.catalog.some(
+      !discovery.catalog.some(
         (entry) => entry.routeKey === "POST /api/workflows/finance/cash-runway-forecast",
       ),
-      "expected cash runway workflow route in curated discovery",
+      "cash runway workflow should stay live without appearing in primary discovery",
     );
     const openApiResponse = await fetch(`${baseUrl}/openapi.json`);
     const openApi = await openApiResponse.json();
     assert.equal(openApiResponse.status, 200);
-    assert.ok(openApi.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
+    assert.ok(!openApi.paths["/api/workflows/finance/cash-runway-forecast"]?.post);
 
     const response = await fetch(`${baseUrl}/api/workflows/finance/cash-runway-forecast`, {
       method: "POST",
@@ -2075,15 +2004,15 @@ test("root app publishes and serves the pricing scenario workflow route", async 
     const discovery = await discoveryResponse.json();
     assert.equal(discoveryResponse.status, 200);
     assert.ok(
-      discovery.catalog.some(
+      !discovery.catalog.some(
         (entry) => entry.routeKey === "POST /api/workflows/finance/pricing-plan-compare",
       ),
-      "expected pricing scenario workflow route in curated discovery",
+      "pricing workflow should stay live without appearing in primary discovery",
     );
     const openApiResponse = await fetch(`${baseUrl}/openapi.json`);
     const openApi = await openApiResponse.json();
     assert.equal(openApiResponse.status, 200);
-    assert.ok(openApi.paths["/api/workflows/finance/pricing-plan-compare"]?.post);
+    assert.ok(!openApi.paths["/api/workflows/finance/pricing-plan-compare"]?.post);
 
     const response = await fetch(`${baseUrl}/api/workflows/finance/pricing-plan-compare`, {
       method: "POST",
@@ -2157,15 +2086,15 @@ test("root app publishes and serves the vendor risk workflow route", async () =>
     const discovery = await discoveryResponse.json();
     assert.equal(discoveryResponse.status, 200);
     assert.ok(
-      discovery.catalog.some(
+      !discovery.catalog.some(
         (entry) => entry.routeKey === "POST /api/workflows/vendor/risk-assessment",
       ),
-      "expected vendor workflow route in curated discovery",
+      "vendor workflow should stay live without appearing in primary discovery",
     );
     const openApiResponse = await fetch(`${baseUrl}/openapi.json`);
     const openApi = await openApiResponse.json();
     assert.equal(openApiResponse.status, 200);
-    assert.ok(openApi.paths["/api/workflows/vendor/risk-assessment"]?.post);
+    assert.ok(!openApi.paths["/api/workflows/vendor/risk-assessment"]?.post);
 
     const response = await fetch(`${baseUrl}/api/workflows/vendor/risk-assessment`, {
       method: "POST",

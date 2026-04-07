@@ -1,4 +1,47 @@
 const PDFDocument = require("pdfkit");
+const OPTIONAL_PLAYWRIGHT = (() => {
+  try {
+    return require("playwright");
+  } catch {
+    return null;
+  }
+})();
+const OPTIONAL_PLAYWRIGHT_CORE = (() => {
+  try {
+    return require("playwright-core");
+  } catch {
+    return null;
+  }
+})();
+const OPTIONAL_SPARTICUZ_CHROMIUM_MIN = (() => {
+  try {
+    const chromium = require("@sparticuz/chromium-min");
+    if (chromium && typeof chromium === "object") {
+      chromium.packageName = "@sparticuz/chromium-min";
+    }
+    return chromium;
+  } catch {
+    return null;
+  }
+})();
+const OPTIONAL_SPARTICUZ_CHROMIUM = (() => {
+  try {
+    const chromium = require("@sparticuz/chromium");
+    if (chromium && typeof chromium === "object") {
+      chromium.packageName = "@sparticuz/chromium";
+    }
+    return chromium;
+  } catch {
+    return null;
+  }
+})();
+const OPTIONAL_PUPPETEER = (() => {
+  try {
+    return require("puppeteer");
+  } catch {
+    return null;
+  }
+})();
 
 function sanitizeFileName(value, fallback) {
   return (
@@ -252,9 +295,465 @@ async function generateProposalPdfBuffer(payload = {}) {
   return result;
 }
 
-function renderInlineMarkdown(document, text, x, fontSize, color) {
-  document.fontSize(fontSize).fillColor(color).font("Helvetica").text(String(text || ""), x, document.y, { width: 552 - x });
-  return { height: fontSize };
+function stripHtmlTags(value) {
+  return decodeHtmlEntities(String(value || ""))
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function stripHtmlPreserveWhitespace(value) {
+  return decodeHtmlEntities(String(value || ""))
+    .replace(/<[^>]+>/g, "")
+    .replace(/\r/g, "")
+    .replace(/\t/g, "  ")
+    .trim();
+}
+
+function splitMarkdownTableRow(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isMarkdownTableSeparator(line) {
+  const cells = splitMarkdownTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  const headerLine = lines[startIndex];
+  const separatorLine = lines[startIndex + 1];
+  if (!headerLine || !separatorLine) {
+    return null;
+  }
+  if (!String(headerLine).trim().startsWith("|") || !String(separatorLine).trim().startsWith("|")) {
+    return null;
+  }
+  if (!isMarkdownTableSeparator(separatorLine)) {
+    return null;
+  }
+
+  const headers = splitMarkdownTableRow(headerLine);
+  const rows = [];
+  let nextIndex = startIndex + 2;
+
+  while (nextIndex < lines.length && String(lines[nextIndex] || "").trim().startsWith("|")) {
+    const values = splitMarkdownTableRow(lines[nextIndex]);
+    const row = {};
+    headers.forEach((header, index) => {
+      row[header || `column_${index + 1}`] = values[index] || "";
+    });
+    rows.push(row);
+    nextIndex += 1;
+  }
+
+  return {
+    headers,
+    rows,
+    nextIndex: nextIndex - 1,
+  };
+}
+
+function parseInlineMarkdownSegments(value) {
+  const text = String(value || "");
+  const segments = [];
+  const pattern = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > cursor) {
+      segments.push({ text: text.slice(cursor, match.index), font: "Helvetica" });
+    }
+    const token = match[0];
+    if (token.startsWith("**")) {
+      segments.push({ text: token.slice(2, -2), font: "Helvetica-Bold" });
+    } else if (token.startsWith("`")) {
+      segments.push({ text: token.slice(1, -1), font: "Courier" });
+    } else {
+      segments.push({ text: token.slice(1, -1), font: "Helvetica-Oblique" });
+    }
+    cursor = match.index + token.length;
+  }
+
+  if (cursor < text.length) {
+    segments.push({ text: text.slice(cursor), font: "Helvetica" });
+  }
+
+  return segments.filter((segment) => segment.text);
+}
+
+function renderInlineMarkdown(document, text, x, fontSize, color, options = {}) {
+  const width = options.width || 552 - x;
+  const lineGap = options.lineGap ?? 0;
+  const segments = parseInlineMarkdownSegments(text);
+
+  if (segments.length === 0) {
+    document.fontSize(fontSize).fillColor(color).font("Helvetica").text("", x, document.y, { width, lineGap });
+    return;
+  }
+
+  let isFirst = true;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    document
+      .fontSize(fontSize)
+      .fillColor(color)
+      .font(segment.font)
+      .text(segment.text, isFirst ? x : undefined, isFirst ? document.y : undefined, {
+        width,
+        lineGap,
+        continued: index < segments.length - 1,
+      });
+    isFirst = false;
+  }
+}
+
+function ensureSpaceFor(document, height) {
+  if (document.y + height > 720) {
+    document.addPage();
+  }
+}
+
+function normalizeHeadingKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ");
+}
+
+function getReportTableByHeading(tables, heading) {
+  const target = normalizeHeadingKey(heading);
+  return (Array.isArray(tables) ? tables : []).find(
+    (table) => normalizeHeadingKey(table && table.heading) === target,
+  ) || null;
+}
+
+function toBooleanLabel(value) {
+  if (typeof value === "boolean") {
+    return value ? "Yes" : "No";
+  }
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "true") return "Yes";
+  if (normalized === "false") return "No";
+  return String(value || "");
+}
+
+function chunkLongText(value, chunkSize = 18) {
+  const text = String(value || "").trim();
+  if (!text || /\s/.test(text) || text.length <= chunkSize) {
+    return text;
+  }
+
+  const parts = [];
+  for (let index = 0; index < text.length; index += chunkSize) {
+    parts.push(text.slice(index, index + chunkSize));
+  }
+  return parts.join("\n");
+}
+
+function measureTextHeight(document, text, options = {}) {
+  const font = options.font || "Helvetica";
+  const fontSize = options.fontSize || 10;
+  const width = options.width || 400;
+  const lineGap = options.lineGap ?? 2;
+  document.font(font).fontSize(fontSize);
+  return document.heightOfString(String(text || ""), { width, lineGap });
+}
+
+function drawSectionHeading(document, label, options = {}) {
+  const x = options.x || 54;
+  const width = options.width || 504;
+  ensureSpaceFor(document, 28);
+  document.fontSize(14).font("Helvetica-Bold").fillColor(options.color || "#0f172a").text(String(label || ""), x, document.y, {
+    width,
+  });
+  document.moveDown(0.15);
+  document.moveTo(x, document.y).lineTo(x + width, document.y).strokeColor(options.ruleColor || "#d4af37").lineWidth(1).stroke();
+  document.moveDown(0.45);
+}
+
+function renderBulletList(document, items, options = {}) {
+  const bulletX = options.bulletX || 58;
+  const textX = options.textX || 76;
+  const width = options.width || 468;
+  const color = options.color || "#334155";
+  const bulletColor = options.bulletColor || "#b7791f";
+  const lineGap = options.lineGap ?? 3;
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const text = String(item || "").trim();
+    if (!text) {
+      continue;
+    }
+    const height = measureTextHeight(document, text, {
+      font: "Helvetica",
+      fontSize: 10.5,
+      width,
+      lineGap,
+    });
+    ensureSpaceFor(document, height + 12);
+    const startY = document.y;
+    document.fontSize(10.5).font("Helvetica").fillColor(color).text(text, textX, startY, {
+      width,
+      lineGap,
+    });
+    document.fontSize(11).font("Helvetica-Bold").fillColor(bulletColor).text("•", bulletX, startY + 1);
+    document.y = startY + height + 8;
+  }
+}
+
+function renderKeyValueRows(document, rows, options = {}) {
+  const x = options.x || 54;
+  const width = options.width || 504;
+  const labelWidth = options.labelWidth || 150;
+  const valueWidth = width - labelWidth;
+  const rowGap = options.rowGap ?? 10;
+  const background = options.background || null;
+  const border = options.border || null;
+  const inset = 12;
+
+  const normalizedRows = (Array.isArray(rows) ? rows : []).filter(
+    (row) => row && String(row.label || "").trim() && String(row.value || row.value === 0 ? row.value : "").trim(),
+  );
+  if (normalizedRows.length === 0) {
+    return;
+  }
+
+  const heights = normalizedRows.map((row) => {
+    const value = String(row.value || "");
+    return Math.max(
+      18,
+      measureTextHeight(document, value, {
+        font: row.monospace ? "Courier" : "Helvetica",
+        fontSize: row.fontSize || 10,
+        width: valueWidth - inset * 2,
+        lineGap: 2,
+      }),
+    ) + 6;
+  });
+  const blockHeight =
+    heights.reduce((sum, current) => sum + current, 0)
+    + Math.max(0, normalizedRows.length - 1) * rowGap
+    + inset * 2;
+
+  ensureSpaceFor(document, blockHeight + 8);
+  const top = document.y;
+  if (background) {
+    document.roundedRect(x, top, width, blockHeight, 10).fill(background);
+  }
+  if (border) {
+    document.roundedRect(x, top, width, blockHeight, 10).lineWidth(1).strokeColor(border).stroke();
+  }
+
+  let currentY = top + inset;
+  normalizedRows.forEach((row, index) => {
+    const value = String(row.value || "");
+    document.fontSize(9).font("Helvetica-Bold").fillColor("#475569").text(String(row.label || ""), x + inset, currentY, {
+      width: labelWidth - inset,
+    });
+    document.fontSize(row.fontSize || 10)
+      .font(row.monospace ? "Courier" : "Helvetica")
+      .fillColor("#0f172a")
+      .text(value, x + labelWidth, currentY, {
+        width: valueWidth - inset * 2,
+        lineGap: 2,
+      });
+    currentY += heights[index] + rowGap;
+  });
+
+  document.y = top + blockHeight + 12;
+}
+
+function renderOfacWalletScreeningPdf(document, payload = {}) {
+  const title = String(payload.title || "OFAC Wallet Screening Report");
+  const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+  const headlineMetrics = Array.isArray(payload.headlineMetrics) ? payload.headlineMetrics : [];
+  const executiveSummary = Array.isArray(payload.executiveSummary) ? payload.executiveSummary : [];
+  const tables = Array.isArray(payload.tables) ? payload.tables : [];
+
+  const queryRow = getReportTableByHeading(tables, "Wallet Screening Query")?.rows?.[0] || {};
+  const matchRow = getReportTableByHeading(tables, "Wallet Screening Matches")?.rows?.[0] || {};
+  const freshnessRow = getReportTableByHeading(tables, "Source Freshness")?.rows?.[0] || {};
+  const statusMetric = headlineMetrics.find((metric) => normalizeHeadingKey(metric.label) === "screening status");
+  const matchCountMetric = headlineMetrics.find((metric) => normalizeHeadingKey(metric.label) === "match count");
+  const manualReviewMetric = headlineMetrics.find(
+    (metric) => normalizeHeadingKey(metric.label) === "manual review recommended",
+  );
+  const statusValue = String(statusMetric?.value || queryRow.status || "unknown");
+  const isMatch = statusValue.toLowerCase() === "match";
+  const decisionAccent = isMatch ? "#9f1239" : "#166534";
+  const decisionFill = isMatch ? "#fff1f2" : "#f0fdf4";
+  const decisionText = isMatch ? "Match" : "Clear";
+  const reviewText = toBooleanLabel(manualReviewMetric?.value ?? queryRow.manual_review_recommended);
+  const primaryEntity = String(matchRow.entity_name || "").trim();
+
+  document.rect(0, 0, 612, 118).fill("#121a2f");
+  document.rect(54, 103, 504, 2).fill("#d4af37");
+  document.fontSize(26).font("Helvetica-Bold").fillColor("#fffaf0").text(title, 54, 40, { width: 504 });
+  const metaLine = [
+    metadata.author ? `Author: ${metadata.author}` : null,
+    metadata.date ? `Date: ${metadata.date}` : null,
+  ].filter(Boolean).join("  |  ");
+  if (metaLine) {
+    document.fontSize(10).font("Helvetica").fillColor("#d8dee9").text(metaLine, 54, 79, { width: 504 });
+  }
+  document.y = 132;
+
+  drawSectionHeading(document, "Screening Decision", { color: "#121a2f", ruleColor: "#d4af37" });
+
+  const decisionTop = document.y;
+  ensureSpaceFor(document, 118);
+  document.roundedRect(54, decisionTop, 236, 106, 12).fill(decisionFill);
+  document.roundedRect(310, decisionTop, 248, 106, 12).fill("#f8fafc");
+
+  document.fontSize(9).font("Helvetica-Bold").fillColor("#6b7280").text("Disposition", 72, decisionTop + 14);
+  document.fontSize(28).font("Helvetica-Bold").fillColor(decisionAccent).text(decisionText, 72, decisionTop + 34);
+  document.fontSize(10).font("Helvetica").fillColor("#334155").text(
+    `${Number(matchCountMetric?.value || 0)} designation${Number(matchCountMetric?.value || 0) === 1 ? "" : "s"} matched`,
+    72,
+    decisionTop + 70,
+    { width: 180 },
+  );
+  if (primaryEntity) {
+    document.fontSize(10).font("Helvetica").fillColor("#334155").text(
+      `Primary entity: ${primaryEntity}`,
+      72,
+      decisionTop + 84,
+      { width: 180 },
+    );
+  }
+
+  document.fontSize(9).font("Helvetica-Bold").fillColor("#6b7280").text("Manual Review", 328, decisionTop + 14);
+  document.fontSize(24).font("Helvetica-Bold").fillColor("#0f172a").text(reviewText, 328, decisionTop + 34);
+  document.fontSize(10).font("Helvetica").fillColor("#334155").text(
+    isMatch
+      ? "Do not release or route funds until a compliance reviewer clears the address."
+      : "No exact OFAC wallet hit found. Preserve the memo for audit support.",
+    328,
+    decisionTop + 66,
+    { width: 206, lineGap: 2 },
+  );
+  document.y = decisionTop + 126;
+
+  renderKeyValueRows(document, [
+    {
+      label: "Wallet Reviewed",
+      value: chunkLongText(queryRow.address || ""),
+      monospace: true,
+      fontSize: 9.5,
+    },
+    {
+      label: "Normalized Address",
+      value: chunkLongText(queryRow.normalized_address || ""),
+      monospace: true,
+      fontSize: 9.5,
+    },
+    {
+      label: "Asset Filter",
+      value: String(queryRow.asset_filter || "all"),
+    },
+  ], {
+    background: "#fffaf0",
+    border: "#e5dcc7",
+  });
+
+  if (executiveSummary.length > 0) {
+    drawSectionHeading(document, "Executive Summary", { color: "#121a2f", ruleColor: "#d4af37" });
+    renderBulletList(document, executiveSummary, {
+      bulletColor: "#b7791f",
+      color: "#253047",
+    });
+    document.moveDown(0.2);
+  }
+
+  drawSectionHeading(document, "Dataset Freshness", { color: "#121a2f", ruleColor: "#d4af37" });
+  renderKeyValueRows(document, [
+    {
+      label: "Source URL",
+      value: chunkLongText(String(freshnessRow.source_url || ""), 28),
+      fontSize: 9,
+    },
+    { label: "Refreshed At", value: String(freshnessRow.refreshed_at || "") },
+    { label: "Dataset Published", value: String(freshnessRow.dataset_published_at || "") },
+    { label: "Address Count", value: String(freshnessRow.address_count || "") },
+    {
+      label: "Covered Assets",
+      value: String(freshnessRow.covered_assets || ""),
+    },
+  ], {
+    background: "#fffaf0",
+    border: "#e5dcc7",
+  });
+
+  drawSectionHeading(document, "Sanctions Match", { color: "#121a2f", ruleColor: "#d4af37" });
+  renderKeyValueRows(document, [
+    { label: "Entity", value: String(matchRow.entity_name || "No match found") },
+    { label: "Status", value: String(matchRow.status || statusValue || "unknown") },
+    { label: "Asset", value: String(matchRow.asset || queryRow.asset_filter || "") },
+    { label: "Programs", value: String(matchRow.programs || "None provided") },
+    { label: "Listed On", value: String(matchRow.listed_on || "Not provided") },
+    {
+      label: "Sanctioned Address",
+      value: chunkLongText(matchRow.sanctioned_address || queryRow.address || ""),
+      monospace: true,
+      fontSize: 9.5,
+    },
+  ], {
+    background: "#f8fafc",
+    border: "#d7dee7",
+  });
+}
+
+function renderPdfTable(document, options = {}) {
+  const headers = Array.isArray(options.headers) ? options.headers.filter(Boolean).slice(0, 5) : [];
+  const rows = Array.isArray(options.rows) ? options.rows.slice(0, options.maxRows || 24) : [];
+  if (headers.length === 0 || rows.length === 0) {
+    return;
+  }
+
+  const x = options.x || 54;
+  const width = options.width || 500;
+  const headerHeight = options.headerHeight || 22;
+  const rowHeight = options.rowHeight || 20;
+  const columnWidth = width / headers.length;
+
+  ensureSpaceFor(document, headerHeight + rowHeight * Math.min(rows.length + 1, 8) + 20);
+  let y = document.y;
+
+  document.rect(x, y, width, headerHeight).fill(options.headerColor || "#2563eb");
+  headers.forEach((header, index) => {
+    document.fontSize(9).font("Helvetica-Bold").fillColor("#ffffff").text(
+      String(header),
+      x + 8 + index * columnWidth,
+      y + 6,
+      { width: columnWidth - 16, ellipsis: true },
+    );
+  });
+  y += headerHeight;
+
+  rows.forEach((row, rowIndex) => {
+    ensureSpaceFor(document, rowHeight + 20);
+    if (rowIndex % 2 === 0) {
+      document.rect(x, y, width, rowHeight).fill(options.rowStripeColor || "#f8fafc");
+    }
+    headers.forEach((header, index) => {
+      const value = row && typeof row === "object" ? row[header] : "";
+      document.fontSize(options.fontSize || 8.5).font("Helvetica").fillColor(options.textColor || "#334155").text(
+        value == null ? "" : String(value),
+        x + 8 + index * columnWidth,
+        y + 5,
+        { width: columnWidth - 16, ellipsis: true },
+      );
+    });
+    y += rowHeight;
+  });
+
+  document.y = y + 14;
 }
 
 async function generateMarkdownPdfBuffer(payload = {}) {
@@ -303,6 +802,19 @@ async function generateMarkdownPdfBuffer(payload = {}) {
       document.moveDown(0.3);
       document.moveTo(60, document.y).lineTo(552, document.y).strokeColor("#dddddd").lineWidth(1).stroke();
       document.moveDown(0.5);
+      continue;
+    }
+    const markdownTable = parseMarkdownTable(lines, index);
+    if (markdownTable) {
+      renderPdfTable(document, {
+        headers: markdownTable.headers,
+        rows: markdownTable.rows,
+        x: 60,
+        width: 492,
+        headerColor: "#0f172a",
+        rowStripeColor: "#eef2ff",
+      });
+      index = markdownTable.nextIndex;
       continue;
     }
     if (/^[-*+]\s/.test(trimmed)) {
@@ -357,29 +869,362 @@ async function generateMarkdownPdfBuffer(payload = {}) {
   return result;
 }
 
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'");
+}
+
+function htmlToMarkdownLike(html) {
+  const source = decodeHtmlEntities(String(html || ""));
+  const tableToMarkdown = (tableHtml) => {
+    const rows = Array.from(String(tableHtml).matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi))
+      .map((match) =>
+        Array.from(match[1].matchAll(/<(th|td)\b[^>]*>([\s\S]*?)<\/\1>/gi))
+          .map((cell) => stripHtmlTags(cell[2])),
+      )
+      .filter((cells) => cells.length > 0);
+
+    if (rows.length === 0) {
+      return "";
+    }
+
+    const headers = rows[0];
+    const separator = headers.map(() => "---");
+    return [
+      `| ${headers.join(" | ")} |`,
+      `| ${separator.join(" | ")} |`,
+      ...rows.slice(1).map((row) => `| ${row.join(" | ")} |`),
+      "",
+    ].join("\n");
+  };
+  const listToMarkdown = (listHtml, ordered) => {
+    const items = Array.from(String(listHtml).matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi))
+      .map((match) => stripHtmlTags(match[1]))
+      .filter(Boolean);
+    if (items.length === 0) {
+      return "";
+    }
+    return items
+      .map((item, index) => (ordered ? `${index + 1}. ${item}` : `- ${item}`))
+      .join("\n");
+  };
+  const preToMarkdown = (preHtml) => {
+    const inner = stripHtmlPreserveWhitespace(preHtml);
+    if (!inner) {
+      return "";
+    }
+    return `\n\`\`\`\n${inner}\n\`\`\`\n\n`;
+  };
+
+  return source
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<pre\b[^>]*>[\s\S]*?<\/pre>/gi, (preHtml) => preToMarkdown(preHtml))
+    .replace(/<ol\b[^>]*>[\s\S]*?<\/ol>/gi, (listHtml) => `${listToMarkdown(listHtml, true)}\n\n`)
+    .replace(/<ul\b[^>]*>[\s\S]*?<\/ul>/gi, (listHtml) => `${listToMarkdown(listHtml, false)}\n\n`)
+    .replace(/<table\b[^>]*>[\s\S]*?<\/table>/gi, (tableHtml) => `${tableToMarkdown(tableHtml)}\n`)
+    .replace(/<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, text) => `**${stripHtmlTags(text)}**`)
+    .replace(/<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, _tag, text) => `*${stripHtmlTags(text)}*`)
+    .replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, text) => `\`${stripHtmlTags(text)}\``)
+    .replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_m, text) => `\n> ${stripHtmlTags(text)}\n\n`)
+    .replace(/<(h1|h2|h3|h4|h5|h6)\b[^>]*>([\s\S]*?)<\/\1>/gi, (_m, tag, text) => {
+      const level = Number(String(tag).slice(1));
+      return `${"#".repeat(level)} ${stripHtmlTags(text)}\n\n`;
+    })
+    .replace(/<(p|div|section|article|header|footer|main|aside|blockquote|pre|tr)\b[^>]*>/gi, "\n")
+    .replace(/<\/(p|div|section|article|header|footer|main|aside|blockquote|pre|tr)>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(ul|ol)>/gi, "\n\n")
+    .replace(/<td\b[^>]*>/gi, " ")
+    .replace(/<\/td>/gi, " ")
+    .replace(/<th\b[^>]*>/gi, " ")
+    .replace(/<\/th>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+async function generateHtmlPdfBuffer(payload = {}) {
+  const html = String(payload.html || payload.content || "");
+  const markdown = htmlToMarkdownLike(html);
+  return generateMarkdownPdfBuffer({
+    ...payload,
+    markdown,
+  });
+}
+
+function toChromiumPageFormat(value) {
+  const normalized = String(value || "LETTER").trim().toUpperCase();
+  if (normalized === "LETTER") return "Letter";
+  if (normalized === "LEGAL") return "Legal";
+  if (normalized === "TABLOID") return "Tabloid";
+  if (normalized === "A3") return "A3";
+  if (normalized === "A4") return "A4";
+  return "Letter";
+}
+
+function buildChromiumPdfOptions(payload = {}) {
+  const margins = payload.margins && typeof payload.margins === "object" ? payload.margins : {};
+  return {
+    format: toChromiumPageFormat(payload.pageSize),
+    printBackground: payload.printBackground !== false,
+    preferCSSPageSize: payload.preferCSSPageSize !== false,
+    margin: {
+      top: String(margins.top || "0.5in"),
+      right: String(margins.right || "0.5in"),
+      bottom: String(margins.bottom || "0.5in"),
+      left: String(margins.left || "0.5in"),
+    },
+  };
+}
+
+function createPlaywrightChromiumAdapter(chromium) {
+  if (!chromium || typeof chromium.launch !== "function") {
+    return null;
+  }
+  return {
+    engine: "chromium",
+    async renderHtmlToPdfBuffer({ html, pdfOptions, launchOptions }) {
+      const browser = await chromium.launch({
+        headless: true,
+        ...(launchOptions && typeof launchOptions === "object" ? launchOptions : {}),
+      });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(String(html || ""), { waitUntil: "networkidle" });
+        const bytes = await page.pdf(pdfOptions);
+        return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || "");
+      } finally {
+        await browser.close();
+      }
+    },
+  };
+}
+
+function createManagedPlaywrightChromiumAdapter(playwright, chromiumRuntime, options = {}) {
+  const chromium = playwright && playwright.chromium;
+  if (!chromium || typeof chromium.launch !== "function") {
+    return null;
+  }
+
+  const runtime = chromiumRuntime && typeof chromiumRuntime === "object"
+    ? (chromiumRuntime.default || chromiumRuntime)
+    : chromiumRuntime;
+
+  if (!runtime || typeof runtime.executablePath !== "function") {
+    return null;
+  }
+
+  return {
+    engine: "chromium",
+    async renderHtmlToPdfBuffer({ html, pdfOptions, launchOptions }) {
+      const executablePath = await runtime.executablePath(options.packLocation);
+      const browser = await chromium.launch({
+        headless: true,
+        executablePath,
+        args: Array.isArray(runtime.args) ? runtime.args : undefined,
+        ...(launchOptions && typeof launchOptions === "object" ? launchOptions : {}),
+      });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(String(html || ""), { waitUntil: "networkidle" });
+        const bytes = await page.pdf(pdfOptions);
+        return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || "");
+      } finally {
+        await browser.close();
+      }
+    },
+  };
+}
+
+function resolveChromiumPackLocation(runtime) {
+  if (!runtime || !["object", "function"].includes(typeof runtime)) {
+    return undefined;
+  }
+
+  if (!/chromium-min/i.test(String(runtime.packageName || ""))) {
+    return undefined;
+  }
+
+  return process.env.CHROMIUM_PACK_URL
+    || "https://github.com/Sparticuz/chromium/releases/download/v143.0.0/chromium-v143.0.0-pack.x64.tar";
+}
+
+function createPuppeteerChromiumAdapter(puppeteer) {
+  if (!puppeteer || typeof puppeteer.launch !== "function") {
+    return null;
+  }
+  return {
+    engine: "chromium",
+    async renderHtmlToPdfBuffer({ html, pdfOptions, launchOptions }) {
+      const browser = await puppeteer.launch({
+        headless: "new",
+        ...(launchOptions && typeof launchOptions === "object" ? launchOptions : {}),
+      });
+      try {
+        const page = await browser.newPage();
+        await page.setContent(String(html || ""), { waitUntil: "networkidle0" });
+        const bytes = await page.pdf(pdfOptions);
+        return Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || "");
+      } finally {
+        await browser.close();
+      }
+    },
+  };
+}
+
+function loadRuntimeChromiumAdapter() {
+  const playwrightAdapter = createPlaywrightChromiumAdapter(OPTIONAL_PLAYWRIGHT && OPTIONAL_PLAYWRIGHT.chromium);
+  if (playwrightAdapter) {
+    return playwrightAdapter;
+  }
+
+  const managedPlaywrightAdapter = createManagedPlaywrightChromiumAdapter(
+    OPTIONAL_PLAYWRIGHT_CORE,
+    OPTIONAL_SPARTICUZ_CHROMIUM,
+  );
+  if (managedPlaywrightAdapter) {
+    return managedPlaywrightAdapter;
+  }
+
+  const minManagedPlaywrightAdapter = createManagedPlaywrightChromiumAdapter(
+    OPTIONAL_PLAYWRIGHT_CORE,
+    OPTIONAL_SPARTICUZ_CHROMIUM_MIN,
+    {
+      packLocation: resolveChromiumPackLocation(OPTIONAL_SPARTICUZ_CHROMIUM_MIN),
+    },
+  );
+  if (minManagedPlaywrightAdapter) {
+    return minManagedPlaywrightAdapter;
+  }
+
+  const puppeteerAdapter = createPuppeteerChromiumAdapter(OPTIONAL_PUPPETEER);
+  if (puppeteerAdapter) {
+    return puppeteerAdapter;
+  }
+
+  return null;
+}
+
+async function generateChromiumHtmlPdfBuffer(payload = {}, runtime = {}) {
+  const html = String(payload.html || payload.content || "");
+  const hasExplicitAdapter = runtime && Object.prototype.hasOwnProperty.call(runtime, "chromiumAdapter");
+  const adapter = hasExplicitAdapter
+    ? runtime.chromiumAdapter
+    : runtime && runtime.disableRuntimeChromium
+      ? null
+      : loadRuntimeChromiumAdapter();
+
+  if (adapter && typeof adapter.renderHtmlToPdfBuffer === "function") {
+    try {
+      const bytes = await adapter.renderHtmlToPdfBuffer({
+        html,
+        payload,
+        pdfOptions: buildChromiumPdfOptions(payload),
+        launchOptions: payload.chromiumLaunchOptions,
+      });
+      return {
+        buffer: Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || ""),
+        fileName: "document.pdf",
+        engine: adapter.engine || "chromium",
+      };
+    } catch (error) {
+      // If Chromium is installed but cannot launch in the current runtime,
+      // keep the max-fidelity route usable by degrading to the semantic lane.
+      const fallback = await generateHtmlPdfBuffer(payload);
+      return {
+        ...fallback,
+        engine: "semantic",
+        degradationReason: error && error.message ? String(error.message) : "chromium launch failed",
+      };
+    }
+  }
+
+  const fallback = await generateHtmlPdfBuffer(payload);
+  return {
+    ...fallback,
+    engine: "semantic",
+    degradationReason: adapter ? "chromium adapter unavailable" : "chromium adapter unavailable",
+  };
+}
+
 async function generateReportPdfBuffer(payload = {}) {
   const title = String(payload.title || "Structured Report");
   const executiveSummary = Array.isArray(payload.executiveSummary) ? payload.executiveSummary : [];
+  const headlineMetrics = Array.isArray(payload.headlineMetrics) ? payload.headlineMetrics : [];
   const tables = Array.isArray(payload.tables) ? payload.tables : [];
+  const sections = Array.isArray(payload.sections) ? payload.sections : [];
   const metadata = payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
 
   const document = new PDFDocument({ size: "LETTER", margin: 54 });
   const result = collectPdf(document, `${sanitizeFileName(title, "structured-report")}.pdf`);
 
+  if (String(metadata.report_type || "").trim().toLowerCase() === "ofac-wallet-screening") {
+    renderOfacWalletScreeningPdf(document, payload);
+    document.fontSize(8).font("Helvetica").fillColor("#94a3b8").text(
+      "Generated by Meridian Doc-Gen",
+      54,
+      730,
+      { width: 504, align: "center" },
+    );
+    document.end();
+    return result;
+  }
+
   document.rect(0, 0, 612, 120).fill("#0f172a");
   document.fontSize(24).font("Helvetica-Bold").fillColor("#ffffff").text(title, 54, 42, {
     width: 504,
   });
+  if (metadata.subtitle) {
+    document.fontSize(11).font("Helvetica").fillColor("#cbd5e1").text(String(metadata.subtitle), 54, 72, {
+      width: 504,
+    });
+  }
   const metaLine = [
     metadata.report_type ? `Type: ${metadata.report_type}` : null,
     metadata.author ? `Author: ${metadata.author}` : null,
+    metadata.date ? `Date: ${metadata.date}` : null,
+    metadata.version ? `Version: ${metadata.version}` : null,
   ].filter(Boolean).join("  |  ");
   if (metaLine) {
-    document.fontSize(10).font("Helvetica").fillColor("#cbd5e1").text(metaLine, 54, 80, {
+    document.fontSize(10).font("Helvetica").fillColor("#cbd5e1").text(metaLine, 54, metadata.subtitle ? 92 : 80, {
       width: 504,
     });
   }
   document.y = 145;
+
+  if (headlineMetrics.length > 0) {
+    const cards = headlineMetrics.slice(0, 3);
+    const cardWidth = 156;
+    const gap = 16;
+    const cardY = document.y;
+    cards.forEach((metric, index) => {
+      const x = 54 + index * (cardWidth + gap);
+      document.roundedRect(x, cardY, cardWidth, 62, 8).fill(index === 0 ? "#eff6ff" : "#f8fafc");
+      document.fontSize(8).font("Helvetica-Bold").fillColor("#64748b").text(String(metric.label || "").toUpperCase(), x + 12, cardY + 10, {
+        width: cardWidth - 24,
+      });
+      document.fontSize(18).font("Helvetica-Bold").fillColor("#0f172a").text(String(metric.value == null ? "" : metric.value), x + 12, cardY + 24, {
+        width: cardWidth - 24,
+      });
+      if (metric.unit) {
+        document.fontSize(8).font("Helvetica").fillColor("#475569").text(String(metric.unit), x + 12, cardY + 46, {
+          width: cardWidth - 24,
+        });
+      }
+    });
+    document.y = cardY + 80;
+  }
 
   if (executiveSummary.length > 0) {
     document.fontSize(14).font("Helvetica-Bold").fillColor("#0f172a").text("Executive Summary");
@@ -410,45 +1255,71 @@ async function generateReportPdfBuffer(payload = {}) {
     document.fontSize(13).font("Helvetica-Bold").fillColor("#2563eb").text(String(table.heading || "Section"));
     document.moveDown(0.25);
 
-    const tableWidth = 500;
-    const usableColumns = columns.slice(0, 4);
-    const columnWidth = tableWidth / usableColumns.length;
-    let y = document.y;
-
-    document.rect(54, y, tableWidth, 20).fill("#2563eb");
-    usableColumns.forEach((column, index) => {
-      document.fontSize(9).font("Helvetica-Bold").fillColor("#ffffff").text(
-        String(column),
-        60 + index * columnWidth,
-        y + 5,
-        { width: columnWidth - 8, ellipsis: true },
-      );
+    renderPdfTable(document, {
+      headers: columns,
+      rows,
+      x: 54,
+      width: 500,
+      headerColor: "#2563eb",
+      rowStripeColor: "#f8fafc",
     });
-    y += 20;
+  }
 
-    rows.slice(0, 20).forEach((row, rowIndex) => {
-      const rowHeight = 18;
-      if (rowIndex % 2 === 0) {
-        document.rect(54, y, tableWidth, rowHeight).fill("#f8fafc");
-      }
-      usableColumns.forEach((column, index) => {
-        const value = row && typeof row === "object" ? row[column] : "";
-        document.fontSize(8.5).font("Helvetica").fillColor("#334155").text(
-          value == null ? "" : String(value),
-          60 + index * columnWidth,
-          y + 4,
-          { width: columnWidth - 8, ellipsis: true },
-        );
+  for (const section of sections) {
+    const normalizedSection = section && typeof section === "object" ? section : {};
+    const heading = String(normalizedSection.heading || normalizedSection.title || "Section");
+    const body = String(normalizedSection.body || normalizedSection.text || "").trim();
+    const bullets = Array.isArray(normalizedSection.bullets) ? normalizedSection.bullets : [];
+    const rows = Array.isArray(normalizedSection.table) ? normalizedSection.table : [];
+
+    if (document.y > 640) {
+      document.addPage();
+    }
+
+    document.fontSize(13).font("Helvetica-Bold").fillColor("#2563eb").text(heading);
+    document.moveDown(0.25);
+
+    if (body) {
+      document.fontSize(10).font("Helvetica").fillColor("#334155").text(body, {
+        width: 500,
+        lineGap: 2,
       });
-      y += rowHeight;
-      if (y > 700 && rowIndex < rows.length - 1) {
-        document.y = y;
-        document.addPage();
-        y = 60;
-      }
-    });
+      document.moveDown(0.45);
+    }
 
-    document.y = y + 14;
+    for (const bullet of bullets) {
+      const startY = document.y;
+      document.fontSize(10).font("Helvetica").fillColor("#334155").text(String(bullet), 72, startY, {
+        width: 470,
+        lineGap: 2,
+      });
+      document.fontSize(10).font("Helvetica-Bold").fillColor("#2563eb").text("•", 58, startY);
+      document.moveDown(0.25);
+    }
+
+    if (rows.length > 0) {
+      const columns = Array.from(
+        rows.reduce((set, row) => {
+          if (row && typeof row === "object" && !Array.isArray(row)) {
+            Object.keys(row).forEach((key) => set.add(key));
+          }
+          return set;
+        }, new Set()),
+      ).slice(0, 4);
+
+      if (columns.length > 0) {
+        renderPdfTable(document, {
+          headers: columns,
+          rows,
+          x: 54,
+          width: 500,
+          headerColor: "#2563eb",
+          rowStripeColor: "#f8fafc",
+        });
+      }
+    } else {
+      document.moveDown(0.45);
+    }
   }
 
   document.fontSize(8).font("Helvetica").fillColor("#94a3b8").text(
@@ -463,8 +1334,12 @@ async function generateReportPdfBuffer(payload = {}) {
 }
 
 module.exports = {
+  htmlToMarkdownLike,
   generateContractPdfBuffer,
   generateProposalPdfBuffer,
+  generateHtmlPdfBuffer,
+  generateChromiumHtmlPdfBuffer,
   generateMarkdownPdfBuffer,
   generateReportPdfBuffer,
+  resolveChromiumPackLocation,
 };

@@ -16,6 +16,7 @@
     "@x402/express": "^2.6.0",
     "@x402/extensions": "^2.6.0",
     "express": "^5.2.1",
+    "fast-xml-parser": "^5.3.0",
     "node-fetch": "^2.7.0"
   }
 }

@@ -4,159 +4,168 @@ const test = require("node:test");
 const {
   buildBatchScreeningResponse,
   buildScreeningResponse,
-  groupMatches,
-  normalizeQueryName,
-  splitCounterpartyNames,
-  splitQueryValues,
+  extractWalletDatasetFromXml,
+  normalizeWalletAddress,
+  screenWalletAddressesBatch,
+  screenWalletAddress,
 } = require("../lib/ofac");
+const { OFAC_WALLET_XML } = require("./fixtures/ofac-wallet-xml");
 
-test("groupMatches collapses aliases under a shared OFAC id", () => {
-  const grouped = groupMatches(
-    [
-      {
-        id: 18715,
-        name: "AKTSIONERNE TOVARYSTVO SBERBANK",
-        address: "46 Volodymyrska street",
-        type: "Entity",
-        programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-        lists: "SDN; Non-SDN",
-        nameScore: 100,
-      },
-      {
-        id: 18715,
-        name: "JSC SBERBANK",
-        address: "46 Volodymyrska street",
-        type: "Entity",
-        programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-        lists: "SDN; Non-SDN",
-        nameScore: 100,
-      },
-      {
-        id: 18715,
-        name: "JOINT STOCK COMPANY SBERBANK",
-        address: "46 Volodymyrska street",
-        type: "Entity",
-        programs: "RUSSIA-EO14024",
-        lists: "SDN",
-        nameScore: 100,
-      },
-    ],
-    "SBERBANK",
-  );
+test("extractWalletDatasetFromXml builds an exact-match address dataset from OFAC XML", () => {
+  const dataset = extractWalletDatasetFromXml(OFAC_WALLET_XML);
 
-  assert.equal(grouped.length, 1);
-  assert.equal(grouped[0].id, 18715);
-  assert.equal(grouped[0].primaryName, "AKTSIONERNE TOVARYSTVO SBERBANK");
-  assert.deepEqual(grouped[0].aliases, [
-    "JOINT STOCK COMPANY SBERBANK",
-    "JSC SBERBANK",
-  ]);
-  assert.deepEqual(grouped[0].programs, [
-    "RUSSIA-EO14024",
-    "UKRAINE-EO13662",
-  ]);
-  assert.deepEqual(grouped[0].lists, ["Non-SDN", "SDN"]);
-  assert.equal(grouped[0].exactNameMatch, false);
+  assert.equal(dataset.addressCount, 2);
+  assert.deepEqual(dataset.coveredAssets, ["ETH", "XBT"]);
+  assert.equal(dataset.entries[0].entityName, "Lazarus Group");
+  assert.deepEqual(dataset.entries[0].aliases, ["Hidden Cobra"]);
+  assert.deepEqual(dataset.entries[0].programs, ["DPRK3"]);
+  assert.deepEqual(dataset.entries[0].measures, ["Block", "Program"]);
+  assert.equal(dataset.entries[0].listName, "SDN List");
+  assert.equal(dataset.entries[0].listedOn, "2019-09-13");
 });
 
-test("buildScreeningResponse marks manual review when grouped matches exist", () => {
-  const response = buildScreeningResponse(
-    {
-      name: "SBERBANK",
-      minScore: 90,
-      limit: 5,
-      programs: [],
-      list: "",
-      type: "",
-      country: "",
-    },
-    [
-      {
-        id: 18715,
-        name: "JSC SBERBANK",
-        address: "46 Volodymyrska street",
-        type: "Entity",
-        programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-        lists: "SDN; Non-SDN",
-        nameScore: 100,
-      },
-    ],
-    {
-      sdnLastUpdated: "2026-03-13T00:00:00",
-      consolidatedLastUpdated: "2026-01-08T00:00:00",
-    },
+test("normalizeWalletAddress lowercases hex addresses but preserves case-sensitive formats", () => {
+  assert.equal(
+    normalizeWalletAddress("  0x098B716B8Aaf21512996dC57EB0615e2383E2f96  "),
+    "0x098b716b8aaf21512996dc57eb0615e2383e2f96",
   );
+  assert.equal(
+    normalizeWalletAddress("1BoatSLRHtKNngkdXEeobR76b53LETtpyT"),
+    "1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
+  );
+});
+
+test("screenWalletAddress performs exact matching with optional asset filtering", () => {
+  const dataset = extractWalletDatasetFromXml(OFAC_WALLET_XML);
+
+  const hit = screenWalletAddress(dataset, {
+    address: "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+  });
+  assert.equal(hit.summary.status, "match");
+  assert.equal(hit.summary.matchCount, 1);
+  assert.equal(hit.summary.manualReviewRecommended, true);
+  assert.equal(hit.matches[0].asset, "ETH");
+  assert.equal(hit.matches[0].entityName, "Lazarus Group");
+
+  const filteredClear = screenWalletAddress(dataset, {
+    address: "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+    asset: "XBT",
+  });
+  assert.equal(filteredClear.summary.status, "clear");
+  assert.equal(filteredClear.summary.matchCount, 0);
+  assert.equal(filteredClear.summary.manualReviewRecommended, false);
+});
+
+test("buildScreeningResponse returns a wallet-screening payload that is usable directly or in reports", () => {
+  const dataset = extractWalletDatasetFromXml(OFAC_WALLET_XML);
+  const screening = screenWalletAddress(dataset, {
+    address: "1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
+  });
+
+  const response = buildScreeningResponse(screening, {
+    sourceUrl: "https://www.treasury.gov/ofac/downloads/sanctions/1.0/sdn_advanced.xml",
+    refreshedAt: "2026-04-06T02:00:00.000Z",
+    datasetPublishedAt: "2026-04-06T02:00:00.000Z",
+    addressCount: dataset.addressCount,
+    coveredAssets: dataset.coveredAssets,
+  });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.summary.status, "potential-match");
-  assert.equal(response.data.summary.manualReviewRecommended, true);
-  assert.equal(response.data.matches[0].detailUrl.endsWith("18715"), true);
+  assert.equal(response.data.query.address, "1BoatSLRHtKNngkdXEeobR76b53LETtpyT");
+  assert.equal(response.data.summary.status, "match");
+  assert.equal(response.data.matches[0].entityName, "Example Mixer");
+  assert.equal(response.data.sourceFreshness.addressCount, 2);
+  assert.deepEqual(response.data.sourceFreshness.coveredAssets, ["ETH", "XBT"]);
   assert.equal(response.data.screeningOnly, true);
+  assert.match(response.data.note, /wallet address/i);
+  assert.equal(response.report.report_meta.report_type, "ofac-wallet-screening");
+  assert.match(response.report.report_meta.title, /OFAC Wallet Screening Report/i);
+  assert.equal(response.report.headline_metrics[0].label, "Screening status");
+  assert.equal(response.report.headline_metrics[0].value, "match");
+  assert.equal(response.report.headline_metrics[1].label, "Match count");
+  assert.equal(response.report.headline_metrics[1].value, 1);
+  assert.deepEqual(response.report.tables.wallet_screening_query.columns, [
+    "address",
+    "normalized_address",
+    "asset_filter",
+    "status",
+    "exact_address_match",
+    "manual_review_recommended",
+  ]);
+  assert.equal(
+    response.report.tables.wallet_screening_matches.rows[0].entity_name,
+    "Example Mixer",
+  );
+  assert.equal(
+    response.report.tables.wallet_screening_matches.rows[0].screened_address,
+    "1BoatSLRHtKNngkdXEeobR76b53LETtpyT",
+  );
+  assert.equal(
+    response.report.tables.source_freshness.rows[0].dataset_published_at,
+    "2026-04-06T02:00:00.000Z",
+  );
+  assert.equal(
+    response.report.export_artifacts.recommended_local_path,
+    "outputs/ofac-wallet-screen-1boatslrhtknngkdxeeobr76b53lettpyt",
+  );
+  assert.equal(response.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+  assert.equal(response.artifacts.docx.endpoint, "/api/tools/report/docx/generate");
+  assert.equal(
+    response.artifacts.pdf.recommended_local_path,
+    "outputs/ofac-wallet-screen-1boatslrhtknngkdxeeobr76b53lettpyt.pdf",
+  );
+  assert.equal(
+    response.artifacts.docx.recommended_local_path,
+    "outputs/ofac-wallet-screen-1boatslrhtknngkdxeeobr76b53lettpyt.docx",
+  );
 });
 
-test("buildBatchScreeningResponse recommends pause when any counterparty is flagged", () => {
-  const response = buildBatchScreeningResponse(
-    {
-      names: ["SBERBANK", "Acme Trading LLC"],
-      workflow: "vendor-onboarding",
-      minScore: 90,
-      limit: 3,
-      programs: [],
-      list: "",
-      type: "",
-      country: "",
-    },
-    [
-      {
-        name: "SBERBANK",
-        rawMatches: [
-          {
-            id: 18715,
-            name: "JSC SBERBANK",
-            address: "46 Volodymyrska street",
-            type: "Entity",
-            programs: "RUSSIA-EO14024; UKRAINE-EO13662",
-            lists: "SDN; Non-SDN",
-            nameScore: 100,
-          },
-        ],
-      },
-      {
-        name: "Acme Trading LLC",
-        rawMatches: [],
-      },
+test("screenWalletAddressesBatch aggregates wallet decisions into a batch summary", () => {
+  const dataset = extractWalletDatasetFromXml(OFAC_WALLET_XML);
+
+  const batch = screenWalletAddressesBatch(dataset, {
+    addresses: [
+      "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "0x1111111111111111111111111111111111111111",
     ],
-    {
-      sdnLastUpdated: "2026-03-13T00:00:00",
-      consolidatedLastUpdated: "2026-01-08T00:00:00",
-    },
-  );
+    asset: "ETH",
+  });
+
+  assert.equal(batch.summary.totalScreened, 2);
+  assert.equal(batch.summary.matchCount, 1);
+  assert.equal(batch.summary.clearCount, 1);
+  assert.equal(batch.summary.manualReviewRecommended, true);
+  assert.equal(batch.summary.workflowStatus, "manual_review_required");
+  assert.equal(batch.results[0].summary.status, "match");
+  assert.equal(batch.results[1].summary.status, "clear");
+});
+
+test("buildBatchScreeningResponse returns a report-ready payload with artifact hints", () => {
+  const dataset = extractWalletDatasetFromXml(OFAC_WALLET_XML);
+  const batch = screenWalletAddressesBatch(dataset, {
+    addresses: [
+      "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "0x1111111111111111111111111111111111111111",
+    ],
+    asset: "ETH",
+  });
+
+  const response = buildBatchScreeningResponse(batch, {
+    sourceUrl: "https://www.treasury.gov/ofac/downloads/sanctions/1.0/sdn_advanced.xml",
+    refreshedAt: "2026-04-06T02:00:00.000Z",
+    datasetPublishedAt: "2026-04-06T02:00:00.000Z",
+    addressCount: dataset.addressCount,
+    coveredAssets: dataset.coveredAssets,
+  });
 
   assert.equal(response.success, true);
-  assert.equal(response.data.summary.screenedCount, 2);
-  assert.equal(response.data.summary.flaggedCount, 1);
-  assert.equal(response.data.summary.clearCount, 1);
-  assert.equal(response.data.summary.recommendedAction, "pause-and-review");
-  assert.equal(response.data.counterparties[0].summary.status, "potential-match");
-  assert.equal(response.data.counterparties[1].summary.status, "no-potential-match");
-});
-
-test("splitQueryValues accepts comma-separated and repeated query values", () => {
-  assert.deepEqual(splitQueryValues("SDN, Non-SDN"), ["SDN", "Non-SDN"]);
-  assert.deepEqual(splitQueryValues(["IRAN", "RUSSIA-EO14024, UKRAINE-EO13662"]), [
-    "IRAN",
-    "RUSSIA-EO14024",
-    "UKRAINE-EO13662",
-  ]);
-});
-
-test("splitCounterpartyNames accepts pipe, newline, and semicolon separators", () => {
-  assert.deepEqual(
-    splitCounterpartyNames("SBERBANK|VTB BANK PJSC\nGAZPROMBANK;SBERBANK"),
-    ["SBERBANK", "VTB BANK PJSC", "GAZPROMBANK"],
-  );
-});
-
-test("normalizeQueryName strips punctuation and normalizes case", () => {
-  assert.equal(normalizeQueryName("Bank Melli, Iran"), "BANK MELLI IRAN");
+  assert.equal(response.data.summary.totalScreened, 2);
+  assert.equal(response.data.summary.matchCount, 1);
+  assert.equal(response.data.summary.workflowStatus, "manual_review_required");
+  assert.equal(response.report.report_meta.report_type, "ofac-wallet-screening-batch");
+  assert.equal(response.report.headline_metrics[0].label, "Total screened");
+  assert.equal(response.report.headline_metrics[0].value, 2);
+  assert.equal(response.report.tables.batch_wallet_results.rows.length, 2);
+  assert.equal(response.artifacts.pdf.endpoint, "/api/tools/report/pdf/generate");
+  assert.equal(response.artifacts.docx.endpoint, "/api/tools/report/docx/generate");
 });

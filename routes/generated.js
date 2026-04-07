@@ -8,6 +8,38 @@ const { buildAutoLocalPayload } = require("./generated-auto-local");
 
 const SUPPORTED_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const CANONICAL_GENERATED_NAMESPACE = "/api/tools";
+const GENERATED_DOCUMENT_RUNTIME_ALIASES = [
+  {
+    sourceKey: "POST /api/tools/report/generate",
+    aliasKey: "POST /api/tools/report/pdf/generate",
+    aliasPath: "/api/tools/report/pdf/generate",
+  },
+  {
+    sourceKey: "POST /api/tools/docx/generate",
+    aliasKey: "POST /api/tools/report/docx/generate",
+    aliasPath: "/api/tools/report/docx/generate",
+  },
+  {
+    sourceKey: "POST /api/tools/xlsx/generate",
+    aliasKey: "POST /api/tools/report/xlsx/generate",
+    aliasPath: "/api/tools/report/xlsx/generate",
+  },
+  {
+    sourceKey: "POST /api/tools/pdf/generate",
+    aliasKey: "POST /api/tools/pdf/render-html",
+    aliasPath: "/api/tools/pdf/render-html",
+  },
+  {
+    sourceKey: "POST /api/tools/docx/generate",
+    aliasKey: "POST /api/tools/docx/render-template",
+    aliasPath: "/api/tools/docx/render-template",
+  },
+  {
+    sourceKey: "POST /api/tools/xlsx/generate",
+    aliasKey: "POST /api/tools/xlsx/render-template",
+    aliasPath: "/api/tools/xlsx/render-template",
+  },
+];
 
 function normalizeGeneratedNamespacePath(value) {
   const raw = String(value || "").trim();
@@ -110,7 +142,27 @@ function createGeneratedHandler(entry, routeParts) {
 }
 
 function getCatalogRoutes() {
-  return Array.isArray(catalog?.routes) ? catalog.routes : [];
+  const baseRoutes = Array.isArray(catalog?.routes) ? catalog.routes : [];
+  const routesByKey = new Map(baseRoutes.map((route) => [String(route?.key || "").trim(), route]));
+  const aliasRoutes = [];
+
+  for (const alias of GENERATED_DOCUMENT_RUNTIME_ALIASES) {
+    const sourceRoute = routesByKey.get(alias.sourceKey);
+    if (!sourceRoute) {
+      continue;
+    }
+    aliasRoutes.push({
+      ...sourceRoute,
+      key: alias.aliasKey,
+      routePath: alias.aliasPath,
+      expressPath: alias.aliasPath,
+      resourcePath: alias.aliasPath,
+      canonicalPath: sourceRoute.canonicalPath || sourceRoute.resourcePath || sourceRoute.routePath || alias.aliasPath,
+      compatibilityAlias: true,
+    });
+  }
+
+  return [...baseRoutes, ...aliasRoutes];
 }
 
 const router = Router();

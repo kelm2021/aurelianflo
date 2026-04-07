@@ -16,15 +16,15 @@ const {
 
 test("aurelianflo profile exports canonical descriptions and buyer-facing copy", () => {
   assert.equal(DEFAULT_ORIGIN_TITLE, "AurelianFlo");
-  assert.equal(DESCRIPTION_SHORT, "Compliance screening and decision reports for AI agents.");
-  assert.match(DESCRIPTION_MEDIUM, /OFAC screening/i);
-  assert.match(DESCRIPTION_MEDIUM, /finance scenario workflows/i);
+  assert.equal(DESCRIPTION_SHORT, "Enhanced due diligence memos and wallet screening for AI agents.");
+  assert.match(DESCRIPTION_MEDIUM, /EDD memos/i);
+  assert.match(DESCRIPTION_MEDIUM, /OFAC wallet screening/i);
   assert.match(DESCRIPTION_FULL, /pay-per-call API/i);
   assert.match(DESCRIPTION_FULL, /USDC via x402/i);
-  assert.match(HEALTH_PAGE_LEDE, /OFAC screening/i);
-  assert.match(CATALOG_PAGE_LEDE, /Monte Carlo decision analysis/i);
-  assert.match(HOME_PAGE_AUDIENCE, /compliance teams|fintech developers|AI agents/i);
-  assert.match(HOME_PAGE_VALUE_PROP, /one paid API surface/i);
+  assert.match(HEALTH_PAGE_LEDE, /EDD memos/i);
+  assert.match(CATALOG_PAGE_LEDE, /wallet screening/i);
+  assert.match(HOME_PAGE_AUDIENCE, /compliance teams|fintech operators|AI agents/i);
+  assert.match(HOME_PAGE_VALUE_PROP, /screening, memo, and rendering tools/i);
 });
 
 test("aurelianflo profile removes stale marketing jargon from exported ledes and nav", () => {

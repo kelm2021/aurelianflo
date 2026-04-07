@@ -45,6 +45,74 @@ test("OFAC wallet tool becomes a GET request with path and query params", () => 
   assert.equal(request.body, undefined);
 });
 
+test("batch wallet screening tool becomes a POST request with a JSON body", () => {
+  const request = buildUpstreamRequest(
+    getTool("batch_wallet_screen"),
+    {
+      addresses: [
+        "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+        "0x1111111111111111111111111111111111111111",
+      ],
+      asset: "ETH",
+    },
+    "https://x402.aurelianflo.com",
+  );
+
+  assert.equal(request.method, "POST");
+  assert.equal(
+    request.url,
+    "https://x402.aurelianflo.com/api/workflows/compliance/batch-wallet-screen",
+  );
+  assert.deepEqual(JSON.parse(request.body), {
+    addresses: [
+      "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "0x1111111111111111111111111111111111111111",
+    ],
+    asset: "ETH",
+  });
+});
+
+test("EDD report tool becomes a POST request with case metadata and wallet inputs in the JSON body", () => {
+  const request = buildUpstreamRequest(
+    getTool("edd_report"),
+    {
+      subject_name: "Northwind Treasury Counterparty",
+      case_name: "Counterparty onboarding review",
+      review_reason: "Treasury payout review",
+      jurisdiction: "US",
+      requested_by: "ops@northwind.example",
+      reference_id: "case-2026-04-07-001",
+      output_format: "pdf",
+      addresses: [
+        "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+        "0x1111111111111111111111111111111111111111",
+      ],
+      asset: "ETH",
+    },
+    "https://x402.aurelianflo.com",
+  );
+
+  assert.equal(request.method, "POST");
+  assert.equal(
+    request.url,
+    "https://x402.aurelianflo.com/api/workflows/compliance/edd-report",
+  );
+  assert.deepEqual(JSON.parse(request.body), {
+    subject_name: "Northwind Treasury Counterparty",
+    case_name: "Counterparty onboarding review",
+    review_reason: "Treasury payout review",
+    jurisdiction: "US",
+    requested_by: "ops@northwind.example",
+    reference_id: "case-2026-04-07-001",
+    output_format: "pdf",
+    addresses: [
+      "0x098B716B8Aaf21512996dC57EB0615e2383E2f96",
+      "0x1111111111111111111111111111111111111111",
+    ],
+    asset: "ETH",
+  });
+});
+
 test("decision report tool becomes a POST request with a JSON body", () => {
   const request = buildUpstreamRequest(
     getTool("monte_carlo_decision_report"),

@@ -2,9 +2,9 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.aurelianflo/core",
   "title": "AurelianFlo",
-  "description": "Pay-per-call MCP tools for compliance screening, vendor due diligence, Monte Carlo reports, and PDF, DOCX, or XLSX output.",
+  "description": "Pay-per-call MCP tools for EDD memos, OFAC screening, document output, and retained Monte Carlo reports.",
   "repository": {
-    "url": "https://github.com/kelm2021/x402-data-bazaar",
+    "url": "https://github.com/kelm2021/aurelianflo",
     "source": "github",
     "subfolder": "apps/aurelianflo-mcp"
   },

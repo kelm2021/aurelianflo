@@ -2,6 +2,51 @@ import z from "zod";
 
 export const MCP_PROMPT_DEFINITIONS = [
   {
+    name: "batch_wallet_screening_brief",
+    title: "Batch Wallet Screening Brief",
+    description: "Prepare a batch wallet OFAC screening request and response brief.",
+    arguments: [
+      {
+        name: "addresses",
+        description: "Comma-separated wallet addresses to screen.",
+        required: true,
+      },
+      {
+        name: "asset",
+        description: "Optional asset or network ticker context.",
+        required: false,
+      },
+    ],
+    argsSchema: {
+      addresses: z
+        .string()
+        .min(10)
+        .describe("Comma-separated wallet addresses to screen."),
+      asset: z.string().optional().describe("Optional asset or network ticker context."),
+    },
+    handler: async ({ addresses, asset }) => {
+      const normalizedAddresses = String(addresses)
+        .split(",")
+        .map((address) => address.trim())
+        .filter(Boolean);
+
+      return {
+        messages: [
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text:
+                `Use the batch_wallet_screen tool to screen these wallets: ${normalizedAddresses.join(", ")}` +
+                (asset ? ` with asset context "${asset}"` : "") +
+                ". Return the batch-level proceed or pause decision, identify matched wallets, and note whether the result should be rendered to PDF or DOCX for handoff.",
+            },
+          },
+        ],
+      };
+    },
+  },
+  {
     name: "wallet_ofac_screening_brief",
     title: "Wallet OFAC Screening Brief",
     description: "Prepare a wallet-address OFAC screening request and response brief.",

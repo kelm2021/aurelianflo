@@ -1,19 +1,33 @@
 const crypto = require("node:crypto");
-const { generateDocxBuffer } = require("./docx-generator");
-const { generateXlsxBuffer } = require("./xlsx-generator");
+const {
+  generateDocxBuffer,
+  generatePremiumReportDocxBuffer,
+  generatePremiumSimpleDocxBuffer,
+  generateTemplateDocxBuffer,
+} = require("./docx-generator");
+const {
+  generateXlsxBuffer,
+  generateReportXlsxBuffer,
+  generateSimpleXlsxBuffer,
+  generateTemplateXlsxBuffer,
+} = require("./xlsx-generator");
 const { generateInvoicePdfBuffer } = require("./pdf-invoice-generator");
 const {
   generateContractPdfBuffer,
+  generateChromiumHtmlPdfBuffer,
+  generateHtmlPdfBuffer,
   generateProposalPdfBuffer,
   generateMarkdownPdfBuffer,
   generateReportPdfBuffer,
 } = require("./pdf-generators");
 const {
+  adaptLegacyReportToPdfPayload,
   adaptReportToDocxPayload,
   adaptReportToPdfPayload,
   adaptReportToXlsxPayload,
   buildRecommendedLocalPath,
   extractStructuredReportPayload,
+  isLegacyReportPayload,
   isStructuredReportPayload,
   readRecommendedLocalPath,
 } = require("./report-document-adapter");
@@ -598,6 +612,55 @@ function normalizeContext(input) {
   };
 }
 
+function normalizeGenericPdfPayload(bodyInput) {
+  const body = toObject(bodyInput);
+  const format = readString(body.format).trim().toLowerCase();
+  const content = readString(body.content, "");
+
+  if (format === "markdown" && content.trim() && !readString(body.markdown).trim()) {
+    return { ...body, markdown: content };
+  }
+  if (format === "html" && content.trim() && !readString(body.html).trim()) {
+    return { ...body, html: content };
+  }
+  return body;
+}
+
+function hasMeaningfulGenericPdfInput(bodyInput) {
+  const body = normalizeGenericPdfPayload(bodyInput);
+  if (readString(body.title).trim()) {
+    return true;
+  }
+  if (readString(body.markdown).trim() || readString(body.html).trim() || readString(body.note).trim()) {
+    return true;
+  }
+  if (Array.isArray(body.lines) && body.lines.some((line) => readString(line).trim())) {
+    return true;
+  }
+  if (Array.isArray(body.sections) && body.sections.length > 0) {
+    return true;
+  }
+  if (isPlainObject(body.data) && Object.keys(body.data).length > 0) {
+    return true;
+  }
+  return false;
+}
+
+function resolveDocumentLane(path = "") {
+  const normalized = readString(path).toLowerCase();
+  if (normalized.includes("/report/")) {
+    return "premium-report";
+  }
+  if (
+    normalized.includes("/render-html")
+    || normalized.includes("/render-template")
+    || normalized.includes("/html-to-pdf")
+  ) {
+    return "max-fidelity";
+  }
+  return "premium-simple";
+}
+
 async function buildDocumentArtifact(contextInput) {
   const context = normalizeContext(contextInput);
   const structuredReport = extractStructuredReportPayload(context.body);
@@ -615,60 +678,176 @@ async function buildDocumentArtifact(contextInput) {
     return buildError("unsupported_document_artifact_type", `Unable to resolve artifact type for path: ${context.path}`);
   }
 
+  const normalizedPdfBody = docType === "pdf" ? normalizeGenericPdfPayload(context.body) : context.body;
+  const lane = resolveDocumentLane(context.path);
+  const hasLegacyReport = context.path.includes("/report/") && isLegacyReportPayload(context.body);
+  const requestedTemplate = readString(context.body.template).trim().toLowerCase();
+
+  if (docType === "pdf" && context.path.includes("/report/") && !hasStructuredReport && !hasLegacyReport) {
+    return buildError(
+      "invalid_input",
+      "report/generate requires the shared report model or a legacy report payload with title plus summary or sections.",
+    );
+  }
+
+  if (
+    docType === "pdf"
+    && context.path.includes("/pdf/")
+    && !context.path.includes("/report/")
+    && !hasMeaningfulGenericPdfInput(normalizedPdfBody)
+  ) {
+    return buildError(
+      "invalid_input",
+      "pdf/generate requires at least one renderable input field such as title, markdown, html, note, lines, sections, or data.",
+    );
+  }
+
+  if ((docType === "docx" || docType === "xlsx") && context.path.includes("/report/") && !hasStructuredReport) {
+    return buildError(
+      "invalid_input",
+      `${docType}/report requires the shared report model with report_meta and report-ready tables or sections.`,
+    );
+  }
+
+  if (
+    docType === "pdf"
+    && context.path.includes("/render-html")
+    && !readString(normalizedPdfBody.html || normalizedPdfBody.content).trim()
+  ) {
+    return buildError(
+      "invalid_input",
+      "pdf/render-html requires an html field or content field containing HTML markup.",
+    );
+  }
+
+  if ((docType === "docx" || docType === "xlsx") && context.path.includes("/render-template") && !readString(context.body.template).trim()) {
+    return buildError(
+      "invalid_input",
+      `${docType}/render-template requires a template field naming the template to render.`,
+    );
+  }
+
   const baseName = normalizeSlug(context.title) || "document";
   let fileName = `${baseName}.${docType}`;
 
   let binaryBuffer;
   let mode = "real-binary";
   let errorMessage = null;
+  let degradationReason = null;
+  let engine = docType;
 
   try {
-    if (hasStructuredReport && docType === "xlsx") {
-      const result = await generateXlsxBuffer(adaptReportToXlsxPayload(structuredReport));
+    if (hasStructuredReport && docType === "xlsx" && context.path.includes("/report/")) {
+      const result = await generateReportXlsxBuffer(adaptReportToXlsxPayload(structuredReport));
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
-    } else if (hasStructuredReport && docType === "docx") {
-      const result = await generateDocxBuffer(adaptReportToDocxPayload(structuredReport));
+      engine = result.engine || "report-xlsx";
+    } else if (hasStructuredReport && docType === "docx" && context.path.includes("/report/")) {
+      const result = await generatePremiumReportDocxBuffer(adaptReportToDocxPayload(structuredReport));
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "report-docx";
     } else if (hasStructuredReport && docType === "pdf" && context.path.includes("/report/")) {
       const result = await generateReportPdfBuffer(adaptReportToPdfPayload(structuredReport));
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "report-pdf";
+    } else if (hasLegacyReport && docType === "pdf") {
+      const result = await generateReportPdfBuffer(adaptLegacyReportToPdfPayload(context.body));
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "report-pdf";
     } else if (docType === "pdf" && context.path.includes("/invoice/")) {
       const result = await generateInvoicePdfBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "invoice";
     } else if (docType === "pdf" && context.path.includes("/contract/")) {
       const result = await generateContractPdfBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "contract";
     } else if (docType === "pdf" && context.path.includes("/proposal/")) {
       const result = await generateProposalPdfBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "proposal";
+    } else if (docType === "pdf" && context.path.includes("/render-html")) {
+      const result = await generateChromiumHtmlPdfBuffer({
+        ...normalizedPdfBody,
+        engine: "chromium",
+      });
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "chromium";
+      degradationReason = result.degradationReason || null;
+    } else if (docType === "pdf" && context.path.includes("/html-to-pdf")) {
+      const result = await generateHtmlPdfBuffer(normalizedPdfBody);
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "semantic-html";
     } else if (docType === "pdf" && context.path.includes("/markdown-to-pdf")) {
       const result = await generateMarkdownPdfBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "semantic-markdown";
+    } else if (docType === "pdf" && readString(normalizedPdfBody.markdown).trim()) {
+      const result = await generateMarkdownPdfBuffer(normalizedPdfBody);
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "semantic-markdown";
+    } else if (docType === "pdf" && readString(normalizedPdfBody.html).trim()) {
+      const result = await generateHtmlPdfBuffer(normalizedPdfBody);
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "semantic-html";
     } else if (docType === "pdf") {
       binaryBuffer = buildPdfBuffer(context.title, context.lines);
+      engine = "basic-pdf";
+    } else if (docType === "docx" && (context.path.includes("/render-template") || (requestedTemplate && requestedTemplate !== "general"))) {
+      const result = await generateTemplateDocxBuffer(context.body);
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "template-docx";
+    } else if (docType === "docx" && hasStructuredReport) {
+      const result = await generatePremiumReportDocxBuffer(adaptReportToDocxPayload(structuredReport));
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "report-docx";
     } else if (docType === "docx") {
-      const result = await generateDocxBuffer(context.body);
+      const result = await generatePremiumSimpleDocxBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "simple-docx";
+    } else if (docType === "xlsx" && (context.path.includes("/render-template") || (requestedTemplate && requestedTemplate !== "general"))) {
+      const result = await generateTemplateXlsxBuffer(context.body);
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "template-xlsx";
+    } else if (docType === "xlsx" && hasStructuredReport) {
+      const result = await generateReportXlsxBuffer(adaptReportToXlsxPayload(structuredReport));
+      binaryBuffer = result.buffer;
+      fileName = result.fileName || fileName;
+      engine = result.engine || "report-xlsx";
     } else {
-      const result = await generateXlsxBuffer(context.body);
+      const result = await generateSimpleXlsxBuffer(context.body);
       binaryBuffer = result.buffer;
       fileName = result.fileName || fileName;
+      engine = result.engine || "simple-xlsx";
     }
   } catch (error) {
     mode = "fallback";
     errorMessage = readString(error && error.message, "artifact generation failure");
     binaryBuffer = buildDeterministicFallbackBuffer(docType, context, error);
+    engine = `${engine}-fallback`;
   }
 
   const artifact = createArtifact(docType, fileName, binaryBuffer);
+  const requestedEngine = docType === "pdf" && context.path.includes("/render-html")
+    ? "chromium"
+    : engine;
+  const degraded = requestedEngine === "chromium" && engine !== "chromium";
+  const fulfilledLane = degraded ? "premium-simple" : lane;
 
   const data = {
     documentType: docType,
@@ -687,9 +866,15 @@ async function buildDocumentArtifact(contextInput) {
       xlsx: { mode: "real-binary", fallbackMode: "deterministic-text-base64" },
       selected: {
         type: docType,
+        lane,
+        fulfilledLane,
+        engine,
+        requestedEngine,
         mode,
         realBinary: mode === "real-binary",
         usedFallback: mode !== "real-binary",
+        degraded,
+        degradationReason: degraded ? degradationReason : null,
       },
     },
   };
