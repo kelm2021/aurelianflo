@@ -35,8 +35,6 @@
     "sim-mcp:build": "npm --prefix apps/aurelian-sim-mcp run build",
     "sim-mcp:dev": "npm --prefix apps/aurelian-sim-mcp run dev",
     "sim-mcp:start": "npm --prefix apps/aurelian-sim-mcp run start",
-    "publisher-stack:import": "node scripts/import-publisher-corpus.js",
-    "publisher-stack:pack": "node scripts/build-publisher-pack.js",
     "core40:preflight": "node scripts/core40_preflight.cjs",
     "core40:paid:awal": "node scripts/core40_paid_sweep.cjs",
     "core40:nightly": "node scripts/core40_nightly_monitor.cjs",

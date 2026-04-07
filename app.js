@@ -79,7 +79,7 @@ const DEFAULT_TIMEOUT_SECONDS = 60;
 const DEFAULT_402INDEX_VERIFICATION_HASH =
   "d7b41bc2cde9060ab7842783aa2747acb31f78c53d7d879047cf762a1a3063ea";
 const CANONICAL_BASE_URL = String(
-  process.env.PUBLIC_BASE_URL || "https://x402-data-bazaar.vercel.app",
+  process.env.PUBLIC_BASE_URL || "https://x402.aurelianflo.com",
 )
   .trim()
   .replace(/\/+$/, "");
