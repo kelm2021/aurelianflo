@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const test = require("node:test");
 const fetch = require("node-fetch");
 
@@ -25,7 +26,7 @@ function withServer(app, run) {
   });
 }
 
-test("root app serves the AurelianFlo MCP server card", async () => {
+test("root app serves the AurelianFlo server card", async () => {
   const app = createApp({
     env: {},
     enableDebugRoutes: false,
@@ -38,7 +39,7 @@ test("root app serves the AurelianFlo MCP server card", async () => {
     const payload = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(payload.serverInfo.name, "AurelianFlo MCP");
+    assert.equal(payload.serverInfo.name, "AurelianFlo");
     assert.deepEqual(
       payload.tools.map((tool) => tool.name),
       [
@@ -82,20 +83,22 @@ test("root app exposes MCP info and public docs pages", async () => {
     const mcpPayload = await mcpResponse.json();
 
     assert.equal(mcpResponse.status, 200);
-    assert.equal(mcpPayload.name, "AurelianFlo MCP");
+    assert.equal(mcpPayload.name, "AurelianFlo");
     assert.equal(mcpPayload.transport, "streamable-http");
     assert.match(mcpPayload.docs, /\/mcp\/docs$/);
     assert.match(mcpPayload.privacy, /\/mcp\/privacy$/);
     assert.match(mcpPayload.support, /\/mcp\/support$/);
-    assert.equal(mcpPayload.prompts.length, 3);
+    assert.equal(mcpPayload.prompts.length, 4);
     assert.equal(mcpPayload.icons[0].src.endsWith("/icon.png"), true);
 
     const docsResponse = await fetch(`${baseUrl}/mcp/docs`);
     const docsHtml = await docsResponse.text();
     assert.equal(docsResponse.status, 200);
-    assert.match(docsHtml, /AurelianFlo MCP Docs/);
+    assert.match(docsHtml, /<title>AurelianFlo<\/title>/);
     assert.match(docsHtml, /codex mcp add aurelianflo --url https:\/\/x402\.aurelianflo\.com\/mcp/);
     assert.match(docsHtml, /aurelianflo-core/);
+    assert.match(docsHtml, /batch_wallet_screen/);
+    assert.match(docsHtml, /edd_report/);
     assert.match(docsHtml, /monte_carlo_report/);
     assert.match(docsHtml, /Proof/);
     assert.match(docsHtml, /Lazarus Group/);
@@ -108,6 +111,46 @@ test("root app exposes MCP info and public docs pages", async () => {
     const supportHtml = await supportResponse.text();
     assert.equal(supportResponse.status, 200);
     assert.match(supportHtml, /support@aurelianflo\.com/);
+  });
+});
+
+test("root app accepts streamable HTTP initialize requests on /mcp", async () => {
+  const app = createApp({
+    env: {},
+    enableDebugRoutes: false,
+    paymentGate: (_req, _res, next) => next(),
+    mercTrustMiddleware: null,
+  });
+
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-03-26",
+          capabilities: {},
+          clientInfo: {
+            name: "test-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    const payload = await response.text();
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") || "", /^text\/event-stream/i);
+    assert.match(payload, /"jsonrpc":"2\.0"/);
+    assert.match(payload, /"id":1/);
+    assert.match(payload, /"name":"AurelianFlo"/);
   });
 });
 
@@ -225,4 +268,19 @@ test("MCP bridge rebuilds POST JSON bodies instead of reusing consumed request s
   assert.equal(request.headers.get("content-type"), "application/json");
   assert.equal(request.headers.get("content-length"), null);
   assert.equal(await request.text(), JSON.stringify(payload));
+});
+
+test("MCP bridge uses deploy-traceable module imports", () => {
+  const bridgeSource = fs.readFileSync(require.resolve("../lib/aurelianflo-mcp-bridge"), "utf8");
+
+  assert.equal(
+    bridgeSource.includes("pathToFileURL"),
+    false,
+    "bridge should use literal import specifiers so deployment bundlers can trace MCP dependencies",
+  );
+  assert.equal(
+    bridgeSource.includes("express-handler.js"),
+    false,
+    "bridge should not rely on the nested express handler import, which can miss MCP SDK files in serverless bundles",
+  );
 });

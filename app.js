@@ -7495,8 +7495,6 @@ function createApp(options = {}) {
   const restrictedPartyPaymentsMcpIntegrationHandler =
     options.restrictedPartyPaymentsMcpIntegrationHandler
     || createRestrictedPartyPaymentsMcpIntegrationHandler(createRestrictedPartyRouteConfig(payTo));
-  app.use(express.json());
-  app.use(createSimCompatibleResponseMiddleware());
 
   // Trust Vercel's proxy so req.protocol returns "https" instead of "http".
   app.set("trust proxy", 1);
@@ -7554,6 +7552,8 @@ function createApp(options = {}) {
       network: "base",
     }),
   );
+  app.use(express.json());
+  app.use(createSimCompatibleResponseMiddleware());
   if (enableOpsDashboards) {
     app.get(
       "/ops/metrics",
