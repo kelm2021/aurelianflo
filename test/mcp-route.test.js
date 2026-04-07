@@ -64,7 +64,6 @@ async function withMockedOfacDataset(run) {
     global.fetch = originalFetch;
   }
 }
-
 test("root app serves the AurelianFlo server card", async () => {
   const app = createApp({
     env: {},
@@ -361,7 +360,6 @@ test("MCP bridge executes EDD reporting through the local restricted-party handl
   assert.equal(payload.report.report_meta.report_type, "enhanced-due-diligence");
   assert.equal(payload.report.tables.screening_results.rows.length, 2);
 });
-
 test("MCP bridge uses deploy-traceable module imports", () => {
   const bridgeSource = fs.readFileSync(require.resolve("../lib/aurelianflo-mcp-bridge"), "utf8");
 
