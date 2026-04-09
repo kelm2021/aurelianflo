@@ -4,12 +4,8 @@ import path from "node:path";
 const backendTraceIncludes = [
   "./app.js",
   "./assets/favicon.png",
-  "./apps/finance-workflows/**/*",
   "./apps/generic-parameter-simulator/**/*",
   "./apps/restricted-party-screen/**/*",
-  "./apps/sports-workflows/**/*",
-  "./apps/vendor-entity-brief/**/*",
-  "./apps/vendor-workflows/**/*",
   "./business-dashboard.js",
   "./lib/aurelianflo-mcp-bridge.js",
   "./lib/aurelianflo-profile.js",

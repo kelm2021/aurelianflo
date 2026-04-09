@@ -16,7 +16,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DATASET_NAMESPACE = "ofac-wallet-screen:v1";
 const DATASET_CACHE_KEY = `${DATASET_NAMESPACE}:dataset`;
 const USER_AGENT =
-  "aurelianflo-compliance/1.0 (+https://x402.aurelianflo.com)";
+  "aurelianflo-compliance/1.0 (+https://api.aurelianflo.com)";
 const REFRESH_HOUR_UTC = 2;
 const EVM_HEX_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 

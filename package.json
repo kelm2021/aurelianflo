@@ -2,6 +2,11 @@
   "name": "aurelianflo",
   "version": "1.0.0",
   "description": "Compliance APIs for AI agents: OFAC screening, EDD memos, Monte Carlo reports, and audit-ready document output.",
+  "homepage": "https://aurelianflo.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kelm2021/aurelianflo.git"
+  },
   "main": "index.js",
   "directories": {
     "doc": "docs"
@@ -19,10 +24,6 @@
     "deploy:backend:prod": "vercel --prod --yes",
     "deploy:web:prod": "npm --prefix web run deploy:prod",
     "test:auto-local-pdf-premium": "node --test test/auto-local-pdf-premium.test.js",
-    "rebuild:status": "node scripts/rebuild_status.js",
-    "pipeline:endpoints": "node scripts/scaffold_endpoint_pipeline.js",
-    "pipeline:oneshot-domain": "node scripts/pipeline_domain_oneshot.js",
-    "generated:truth": "node scripts/audit_generated_truth.cjs",
     "restricted-party-screen:distribution-pack": "node scripts/restricted_party_distribution_pack.js",
     "restricted-party-screen:dev": "npm --prefix apps/restricted-party-screen run dev",
     "restricted-party-screen:siwx-demo": "node scripts/restricted_party_siwx_reclaim_demo.js",
@@ -30,12 +31,19 @@
     "sim-mcp:install": "npm --prefix apps/aurelian-sim-mcp install",
     "sim-mcp:build": "npm --prefix apps/aurelian-sim-mcp run build",
     "sim-mcp:dev": "npm --prefix apps/aurelian-sim-mcp run dev",
-    "sim-mcp:start": "npm --prefix apps/aurelian-sim-mcp run start",
-    "core40:preflight": "node scripts/core40_preflight.cjs",
-    "core40:paid:awal": "node scripts/core40_paid_sweep.cjs",
-    "core40:nightly": "node scripts/core40_nightly_monitor.cjs"
+    "sim-mcp:start": "npm --prefix apps/aurelian-sim-mcp run start"
   },
-  "keywords": [],
+  "keywords": [
+    "aurelianflo",
+    "mcp",
+    "x402",
+    "ofac",
+    "edd",
+    "compliance",
+    "monte-carlo",
+    "pdf",
+    "docx"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {

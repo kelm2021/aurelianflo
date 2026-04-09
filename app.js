@@ -11,16 +11,8 @@ const {
   createPaymentsMcpIntegrationHandler: createRestrictedPartyPaymentsMcpIntegrationHandler,
   createRouteConfig: createRestrictedPartyRouteConfig,
 } = require("./apps/restricted-party-screen/app");
-const vendorEntityBriefSellerConfig = require("./apps/vendor-entity-brief/seller.config.json");
-const vendorEntityBriefPrimaryHandler = require("./apps/vendor-entity-brief/handlers/primary");
 const genericSimulatorSellerConfig = require("./apps/generic-parameter-simulator/seller.config.json");
 const genericSimulatorPrimaryHandler = require("./apps/generic-parameter-simulator/handlers/primary");
-const sportsWorkflowSellerConfig = require("./apps/sports-workflows/seller.config.json");
-const sportsWorkflowPrimaryHandler = require("./apps/sports-workflows/handlers/primary");
-const vendorWorkflowSellerConfig = require("./apps/vendor-workflows/seller.config.json");
-const vendorWorkflowPrimaryHandler = require("./apps/vendor-workflows/handlers/primary");
-const financeWorkflowSellerConfig = require("./apps/finance-workflows/seller.config.json");
-const financeWorkflowPrimaryHandler = require("./apps/finance-workflows/handlers/primary");
 const generatedCatalog = require("./routes/generated-catalog.json");
 const generatedRoutesRouter = require("./routes/generated");
 const {
@@ -1678,30 +1670,10 @@ function getBundledSellerRoutes() {
   const restrictedRoutes = Array.isArray(restrictedPartySellerConfig?.routes)
     ? restrictedPartySellerConfig.routes
     : [];
-  const vendorRoutes = Array.isArray(vendorEntityBriefSellerConfig?.routes)
-    ? vendorEntityBriefSellerConfig.routes
-    : vendorEntityBriefSellerConfig?.route
-      ? [vendorEntityBriefSellerConfig.route]
-      : [];
   const genericSimulatorRoutes = Array.isArray(genericSimulatorSellerConfig?.routes)
     ? genericSimulatorSellerConfig.routes
     : genericSimulatorSellerConfig?.route
       ? [genericSimulatorSellerConfig.route]
-      : [];
-  const sportsWorkflowRoutes = Array.isArray(sportsWorkflowSellerConfig?.routes)
-    ? sportsWorkflowSellerConfig.routes
-    : sportsWorkflowSellerConfig?.route
-      ? [sportsWorkflowSellerConfig.route]
-      : [];
-  const vendorWorkflowRoutes = Array.isArray(vendorWorkflowSellerConfig?.routes)
-    ? vendorWorkflowSellerConfig.routes
-    : vendorWorkflowSellerConfig?.route
-      ? [vendorWorkflowSellerConfig.route]
-      : [];
-  const financeWorkflowRoutes = Array.isArray(financeWorkflowSellerConfig?.routes)
-    ? financeWorkflowSellerConfig.routes
-    : financeWorkflowSellerConfig?.route
-      ? [financeWorkflowSellerConfig.route]
       : [];
 
   const bundledRoutes = [
@@ -1710,30 +1682,10 @@ function getBundledSellerRoutes() {
       payTo: restrictedPartySellerConfig?.payTo || PAY_TO,
       seller: "restricted-party-screen",
     })),
-    ...vendorRoutes.map((route) => ({
-      ...route,
-      payTo: vendorEntityBriefSellerConfig?.payTo || PAY_TO,
-      seller: "vendor-entity-brief",
-    })),
     ...genericSimulatorRoutes.map((route) => ({
       ...route,
       payTo: genericSimulatorSellerConfig?.payTo || PAY_TO,
       seller: "generic-parameter-simulator",
-    })),
-    ...sportsWorkflowRoutes.map((route) => ({
-      ...route,
-      payTo: sportsWorkflowSellerConfig?.payTo || PAY_TO,
-      seller: "sports-workflows",
-    })),
-    ...vendorWorkflowRoutes.map((route) => ({
-      ...route,
-      payTo: vendorWorkflowSellerConfig?.payTo || PAY_TO,
-      seller: "vendor-workflows",
-    })),
-    ...financeWorkflowRoutes.map((route) => ({
-      ...route,
-      payTo: financeWorkflowSellerConfig?.payTo || PAY_TO,
-      seller: "finance-workflows",
     })),
   ];
 
@@ -7441,16 +7393,8 @@ function mountPaidRoutes(target) {
     }
 
     let handler = restrictedPartyPrimaryHandler;
-    if (route.seller === "vendor-entity-brief") {
-      handler = vendorEntityBriefPrimaryHandler;
-    } else if (route.seller === "generic-parameter-simulator") {
+    if (route.seller === "generic-parameter-simulator") {
       handler = genericSimulatorPrimaryHandler;
-    } else if (route.seller === "sports-workflows") {
-      handler = sportsWorkflowPrimaryHandler;
-    } else if (route.seller === "vendor-workflows") {
-      handler = vendorWorkflowPrimaryHandler;
-    } else if (route.seller === "finance-workflows") {
-      handler = financeWorkflowPrimaryHandler;
     }
 
     target[method](route.expressPath, handler);

@@ -815,7 +815,7 @@ function createPaymentsMcpIntegration(routes = routeConfig) {
   ];
   const shareCopy = {
     shortPost:
-      "Built a low-friction x402 compliance seller at x402.aurelianflo.com for EDD memos, batch wallet screening, and exact OFAC wallet checks. Public Treasury data, MCP-ready, and SIWX-enabled for repeat access.",
+      "Built a low-friction compliance seller at api.aurelianflo.com for EDD memos, batch wallet screening, and exact OFAC wallet checks. Public Treasury data, MCP-ready, and SIWX-enabled for repeat access.",
     developerDm:
       "If you are building onchain payments, treasury, or exchange controls, I have a live x402 seller for enhanced due diligence memos, batch wallet screening, and exact OFAC wallet checks. It turns wallet review into a workflow-safe paid call with evidence and reviewer handoff fields.",
     docsSnippet:

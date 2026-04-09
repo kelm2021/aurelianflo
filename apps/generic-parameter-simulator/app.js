@@ -28,7 +28,7 @@ const PAY_TO = sellerConfig.payTo;
 const X402_NETWORK = sellerConfig.network || "eip155:8453";
 const DEFAULT_TIMEOUT_SECONDS = sellerConfig.maxTimeoutSeconds || 60;
 const CANONICAL_BASE_URL =
-  process.env.PUBLIC_BASE_URL || sellerConfig.baseUrl || "https://x402.aurelianflo.com";
+  process.env.PUBLIC_BASE_URL || sellerConfig.baseUrl || "https://api.aurelianflo.com";
 
 const DEFAULT_INPUT_EXAMPLE = {
   parameters: {
