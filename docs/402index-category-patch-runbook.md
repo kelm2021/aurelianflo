@@ -67,4 +67,4 @@ $env:INDEX402_REPORT_PATH = "C:/Users/KentEgan/claude projects/x402-data-bazaar/
 
 - Run sequential PATCH requests when the API starts rate-limiting.
 - Keep the raw report file immutable and write new result snapshots alongside it.
-- Prefer preserving this as a runbook doc instead of overwriting `handoff.md`.
+- Prefer preserving this as a dedicated runbook doc instead of reusing a generic handoff file.
